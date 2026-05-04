@@ -1,7 +1,28 @@
-node_modules
-dist
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea/
 .DS_Store
-.pages-tmp-*
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
 # Manual testing artifacts
 docs/_artifacts/
@@ -19,4 +40,11 @@ tools/*
 !tools/ear_training_note_assets.py
 !tools/ear_training_mypiano_match_assets.py
 ios/Flutter/.last_build_id
-*.log
+
+# Android signing secrets
+*.jks
+*.keystore
+android/app/release-keystore.jks
+
+# Local temporary folders
+_tmp_vite_app/
