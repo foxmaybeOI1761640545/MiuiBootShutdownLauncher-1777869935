@@ -1,0 +1,116 @@
+name: Publish Versioned APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Compute next v1.0.n
+        id: version
+        run: |
+          set -euo pipefail
+          latest_tag=$(git tag -l "v1.0.*" | sort -V | tail -n 1 || true)
+          if [ -z "$latest_tag" ]; then
+            next_n=1
+          else
+            current_n=${latest_tag#v1.0.}
+            next_n=$((current_n + 1))
+          fi
+
+          next_version="1.0.${next_n}"
+          next_tag="v${next_version}"
+          current_code=$(grep -E '^[[:space:]]*versionCode[[:space:]]+[0-9]+' android/app/build.gradle | head -n 1 | awk '{print $2}')
+          next_code=$((current_code + 1))
+
+          echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+          echo "next_tag=$next_tag" >> "$GITHUB_OUTPUT"
+          echo "next_code=$next_code" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version files
+        run: |
+          sed -i -E "s/(versionCode[[:space:]]+)[0-9]+/\1${{ steps.version.outputs.next_code }}/" android/app/build.gradle
+          sed -i -E "s/(versionName[[:space:]]+\")[0-9]+\.[0-9]+\.[0-9]+(\")/\1${{ steps.version.outputs.next_version }}\2/" android/app/build.gradle
+          npm version ${{ steps.version.outputs.next_version }} --no-git-tag-version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Decode keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 || vars.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "ANDROID_KEYSTORE_BASE64 is missing"
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
+
+      - name: Build signed release APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android/app/release-keystore.jks
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || vars.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || vars.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || vars.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleRelease
+
+      - name: Prepare release APK file
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/MiuiBootShutdownLauncher-v${{ steps.version.outputs.next_version }}.apk
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add android/app/build.gradle package.json package-lock.json
+          git commit -m "release: bump version to v${{ steps.version.outputs.next_version }}"
+
+      - name: Create and push tag
+        run: |
+          git tag ${{ steps.version.outputs.next_tag }}
+          git push origin HEAD:main
+          git push origin ${{ steps.version.outputs.next_tag }}
+
+      - name: Create GitHub release with APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.next_tag }}
+          name: ${{ steps.version.outputs.next_tag }}
+          body: |
+            Automated release for ${{ steps.version.outputs.next_tag }}.
+            Direct install file: MiuiBootShutdownLauncher-v${{ steps.version.outputs.next_version }}.apk
+          files: android/app/build/outputs/apk/release/MiuiBootShutdownLauncher-v${{ steps.version.outputs.next_version }}.apk

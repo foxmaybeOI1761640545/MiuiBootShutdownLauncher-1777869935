@@ -1,18 +1,18 @@
 # MiuiBootShutdownLauncher
 
-MVP Demo: click one button and open MIUI "定时开关机" page via Android Intent.
+MVP demo app to open the MIUI scheduled power on/off page from one button.
 
-## Stack
+## Tech Stack
 
 - Vue 3 + Vite + TypeScript
 - Capacitor Android
-- Kotlin Capacitor Plugin
-- GitHub Actions release APK build
+- Kotlin Capacitor plugin
+- GitHub Actions for build and release
 
-## Open Strategy
+## Intent Strategy
 
 1. Action: `miui.powercenter.intent.action.BOOT_SHUTDOWN_ONTIME`
-2. Explicit component: `com.miui.securitycenter/com.miui.powercenter.bootshutdown.PowerShutdownOnTime`
+2. Component: `com.miui.securitycenter/com.miui.powercenter.bootshutdown.PowerShutdownOnTime`
 3. Fallback action: `miui.intent.action.POWER_MANAGER`
 
 ## Frontend API
@@ -24,40 +24,34 @@ openBootShutdownPage(): Promise<{
 }>
 ```
 
-## Release Signing (Reusable Key)
+## Signing Variables
 
-Generate one keystore and reuse it forever for upgrades:
-
-```powershell
-keytool -genkeypair `
-  -alias miui-power-release `
-  -keyalg RSA `
-  -keysize 2048 `
-  -validity 36500 `
-  -storetype JKS `
-  -keystore .\release-keystore.jks
-```
-
-Convert to base64 for GitHub Secrets:
-
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes(".\release-keystore.jks")) | Set-Content .\release-keystore.base64.txt
-```
-
-Configure repository secrets:
+Configure one reusable keystore and set these repository secrets or variables:
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_PASSWORD`
 
-The workflow decodes the keystore and runs `assembleRelease` with signing env vars.
+## Workflows
 
-## CI
+### 1) Build workflow
 
-Workflow file: `.github/workflows/android-release.yml`
+File: `.github/workflows/android-release.yml`
 
-Triggers:
+- Trigger: push to `main` or manual dispatch
+- Output: signed release APK artifact named `MiuiBootShutdownLauncher-vX.Y.Z.apk`
 
-- push to `main`
-- manual dispatch
+### 2) Publish workflow
+
+File: `.github/workflows/publish-version.yml`
+
+- Trigger: manual dispatch
+- Behavior:
+  - Calculates next tag in `v1.0.n` format
+  - Bumps `android/app/build.gradle` (`versionCode`, `versionName`)
+  - Bumps `package.json` + `package-lock.json` version
+  - Builds signed release APK
+  - Commits version bump to `main`
+  - Creates tag `v1.0.n`
+  - Creates GitHub Release and uploads direct APK asset

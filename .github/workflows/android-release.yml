@@ -1,4 +1,4 @@
-name: Build Signed Release APK
+name: Build APK
 
 on:
   push:
@@ -58,8 +58,19 @@ jobs:
           cd android
           ./gradlew assembleRelease
 
+      - name: Read app version
+        id: version
+        run: |
+          version_name=$(grep -E '^[[:space:]]*versionName[[:space:]]+"[^"]+"' android/app/build.gradle | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare APK artifact file
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/MiuiBootShutdownLauncher-v${{ steps.version.outputs.version_name }}.apk
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: miui-power-launcher-release
-          path: android/app/build/outputs/apk/release/*.apk
+          name: MiuiBootShutdownLauncher-v${{ steps.version.outputs.version_name }}.apk
+          path: android/app/build/outputs/apk/release/MiuiBootShutdownLauncher-v${{ steps.version.outputs.version_name }}.apk
+          if-no-files-found: error
