@@ -1,0 +1,22 @@
+node_modules
+dist
+.DS_Store
+.pages-tmp-*
+
+# Manual testing artifacts
+docs/_artifacts/
+docs/01-FlutterRemoteDevFlow
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+.packages
+build/
+coverage/
+tools/*
+!tools/ear_training_note_assets.py
+!tools/ear_training_mypiano_match_assets.py
+ios/Flutter/.last_build_id
+*.log

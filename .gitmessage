@@ -1,0 +1,15 @@
+﻿<type>(<scope>): <中文摘要> | <English summary>
+
+- 类型(Type): <feat|service|refactor|ui|docs，多个用逗号分隔>
+- 功能(Feature): <内容> 或 N/A
+- 服务(Service): <内容> 或 N/A
+- 重构(Refactor): <内容> 或 N/A
+- 交互与界面(UI/UX): <内容> 或 N/A
+- 文档(Docs): <内容> 或 N/A
+
+- Types: <feat|service|refactor|ui|docs, comma-separated>
+- Feature: <content> or N/A
+- Service: <content> or N/A
+- Refactor: <content> or N/A
+- UI/UX: <content> or N/A
+- Docs: <content> or N/A
