@@ -35,6 +35,11 @@ openWirelessDebuggingPage(): Promise<{
   ok: boolean;
   method: "wireless_debugging_fragment" | "developer_options" | "none";
 }>
+
+openDeveloperOptions(): Promise<{
+  ok: boolean;
+  method: "application_development_settings" | "none";
+}>
 ```
 
 ## Signing Variables

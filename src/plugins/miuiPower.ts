@@ -10,9 +10,15 @@ export interface OpenWirelessDebuggingResult {
   method: "wireless_debugging_fragment" | "developer_options" | "none";
 }
 
+export interface OpenDeveloperOptionsResult {
+  ok: boolean;
+  method: "application_development_settings" | "none";
+}
+
 export interface MiuiPowerPlugin {
   openBootShutdownPage(): Promise<OpenBootShutdownResult>;
   openWirelessDebuggingPage(): Promise<OpenWirelessDebuggingResult>;
+  openDeveloperOptions(): Promise<OpenDeveloperOptionsResult>;
 }
 
 export const MiuiPower = registerPlugin<MiuiPowerPlugin>("MiuiPower");

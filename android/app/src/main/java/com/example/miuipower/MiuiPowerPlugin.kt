@@ -73,6 +73,18 @@ class MiuiPowerPlugin : Plugin() {
         call.resolve(result(false, "none"))
     }
 
+    @PluginMethod
+    fun openDeveloperOptions(call: PluginCall) {
+        val ctx = context
+
+        if (tryOpenDeveloperOptions(ctx)) {
+            call.resolve(result(true, "application_development_settings"))
+            return
+        }
+
+        call.resolve(result(false, "none"))
+    }
+
     private fun tryOpenByAction(context: Context): Boolean {
         return try {
             val intent = Intent(ACTION_BOOT_SHUTDOWN).apply {

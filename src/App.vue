@@ -18,6 +18,14 @@
               : "打开无线调试页面"
           }}
         </button>
+
+        <button type="button" :disabled="isLoading" @click="openDeveloperOptionsPage">
+          {{
+            loadingAction === "developerOptions"
+              ? "正在打开..."
+              : "打开开发者选项"
+          }}
+        </button>
       </div>
 
       <p v-if="message" class="message">{{ message }}</p>
@@ -29,7 +37,9 @@
 import { computed, ref } from "vue";
 import { MiuiPower } from "./plugins/miuiPower";
 
-const loadingAction = ref<"" | "bootShutdown" | "wirelessDebugging">("");
+const loadingAction = ref<
+  "" | "bootShutdown" | "wirelessDebugging" | "developerOptions"
+>("");
 const message = ref("");
 const isLoading = computed(() => loadingAction.value !== "");
 
@@ -68,6 +78,26 @@ async function openWirelessDebuggingPage() {
         ? String((error as { message?: string }).message ?? "")
         : "";
     message.value = maybeMessage || "无法打开无线调试页面";
+  } finally {
+    loadingAction.value = "";
+  }
+}
+
+async function openDeveloperOptionsPage() {
+  loadingAction.value = "developerOptions";
+  message.value = "";
+
+  try {
+    const result = await MiuiPower.openDeveloperOptions();
+    message.value = result.ok
+      ? `已尝试打开开发者选项，方式：${result.method}`
+      : "无法打开开发者选项";
+  } catch (error) {
+    const maybeMessage =
+      typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message?: string }).message ?? "")
+        : "";
+    message.value = maybeMessage || "无法打开开发者选项";
   } finally {
     loadingAction.value = "";
   }
