@@ -1,6 +1,6 @@
 # MiuiBootShutdownLauncher
 
-MVP demo app to open the MIUI scheduled power on/off page from one button.
+MVP demo app to open MIUI/Android system settings pages from app buttons.
 
 ## Tech Stack
 
@@ -11,9 +11,17 @@ MVP demo app to open the MIUI scheduled power on/off page from one button.
 
 ## Intent Strategy
 
+### Scheduled power on/off page
+
 1. Action: `miui.powercenter.intent.action.BOOT_SHUTDOWN_ONTIME`
 2. Component: `com.miui.securitycenter/com.miui.powercenter.bootshutdown.PowerShutdownOnTime`
 3. Fallback action: `miui.intent.action.POWER_MANAGER`
+
+### Wireless debugging page
+
+1. Component: `com.android.settings/.SubSettings`
+2. Extra `:settings:show_fragment`: `com.android.settings.development.WirelessDebuggingFragment`
+3. Fallback action: `android.settings.APPLICATION_DEVELOPMENT_SETTINGS`
 
 ## Frontend API
 
@@ -21,6 +29,11 @@ MVP demo app to open the MIUI scheduled power on/off page from one button.
 openBootShutdownPage(): Promise<{
   ok: boolean;
   method: "action" | "component" | "fallback" | "none";
+}>
+
+openWirelessDebuggingPage(): Promise<{
+  ok: boolean;
+  method: "wireless_debugging_fragment" | "developer_options" | "none";
 }>
 ```
 

@@ -3,6 +3,7 @@
 
     <queries>
         <package android:name="com.miui.securitycenter" />
+        <package android:name="com.android.settings" />
 
         <intent>
             <action android:name="miui.powercenter.intent.action.BOOT_SHUTDOWN_ONTIME" />
@@ -10,6 +11,10 @@
 
         <intent>
             <action android:name="miui.intent.action.POWER_MANAGER" />
+        </intent>
+
+        <intent>
+            <action android:name="android.settings.APPLICATION_DEVELOPMENT_SETTINGS" />
         </intent>
     </queries>
 

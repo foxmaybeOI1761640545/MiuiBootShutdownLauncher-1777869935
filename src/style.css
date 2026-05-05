@@ -55,6 +55,11 @@ h1 {
   font-size: 14px;
 }
 
+.actions {
+  display: grid;
+  gap: 12px;
+}
+
 button {
   width: 100%;
   border: none;

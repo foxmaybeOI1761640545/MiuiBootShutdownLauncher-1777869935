@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.provider.Settings
 import android.util.Log
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -22,6 +23,15 @@ class MiuiPowerPlugin : Plugin() {
         private const val ACTION_BOOT_SHUTDOWN =
             "miui.powercenter.intent.action.BOOT_SHUTDOWN_ONTIME"
         private const val ACTION_POWER_MANAGER = "miui.intent.action.POWER_MANAGER"
+        private const val PKG_SETTINGS = "com.android.settings"
+        private const val ACTIVITY_SUB_SETTINGS = "com.android.settings.SubSettings"
+        private const val EXTRA_SHOW_FRAGMENT = ":settings:show_fragment"
+        private const val EXTRA_SHOW_FRAGMENT_TITLE = ":settings:show_fragment_title"
+        private const val EXTRA_SOURCE_METRICS = ":settings:source_metrics"
+        private const val FRAGMENT_WIRELESS_DEBUGGING =
+            "com.android.settings.development.WirelessDebuggingFragment"
+        private const val TITLE_WIRELESS_DEBUGGING = "无线调试"
+        private const val SOURCE_METRICS_WIRELESS_DEBUGGING = 1839
     }
 
     @PluginMethod
@@ -40,6 +50,23 @@ class MiuiPowerPlugin : Plugin() {
 
         if (tryOpenPowerManager(ctx)) {
             call.resolve(result(true, "fallback"))
+            return
+        }
+
+        call.resolve(result(false, "none"))
+    }
+
+    @PluginMethod
+    fun openWirelessDebuggingPage(call: PluginCall) {
+        val ctx = context
+
+        if (tryOpenWirelessDebugging(ctx)) {
+            call.resolve(result(true, "wireless_debugging_fragment"))
+            return
+        }
+
+        if (tryOpenDeveloperOptions(ctx)) {
+            call.resolve(result(true, "developer_options"))
             return
         }
 
@@ -96,6 +123,42 @@ class MiuiPowerPlugin : Plugin() {
             true
         } catch (e: Exception) {
             Log.w(TAG, "Fallback launch failed", e)
+            false
+        }
+    }
+
+    private fun tryOpenWirelessDebugging(context: Context): Boolean {
+        return try {
+            val intent = Intent().apply {
+                component = ComponentName(PKG_SETTINGS, ACTIVITY_SUB_SETTINGS)
+                putExtra(EXTRA_SHOW_FRAGMENT, FRAGMENT_WIRELESS_DEBUGGING)
+                putExtra(EXTRA_SHOW_FRAGMENT_TITLE, TITLE_WIRELESS_DEBUGGING)
+                putExtra(EXTRA_SOURCE_METRICS, SOURCE_METRICS_WIRELESS_DEBUGGING)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "Wireless debugging fragment not found", e)
+            false
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Wireless debugging blocked by system", e)
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "Wireless debugging launch failed", e)
+            false
+        }
+    }
+
+    private fun tryOpenDeveloperOptions(context: Context): Boolean {
+        return try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Developer options fallback launch failed", e)
             false
         }
     }
