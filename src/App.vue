@@ -14,13 +14,6 @@
             <span class="switch-thumb" :class="{ on: theme === 'night' }"></span>
           </span>
         </button>
-
-        <button type="button" class="scene-pill" @click="toggleTheme">
-          {{ theme === "day" ? "黑屏" : "白屏" }}
-        </button>
-
-        <button type="button" class="icon-circle" aria-label="说明">i</button>
-        <button type="button" class="icon-circle" aria-label="主页">⌂</button>
       </header>
 
       <section class="panel hero-panel">
