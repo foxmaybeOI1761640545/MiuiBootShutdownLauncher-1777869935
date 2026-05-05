@@ -1,5 +1,5 @@
 :root {
-  font-family: "Noto Sans SC", "Segoe UI", sans-serif;
+  font-family: "Source Han Serif SC", "Noto Serif SC", "STSong", serif;
   line-height: 1.5;
   font-weight: 400;
   font-synthesis: none;
@@ -21,106 +21,222 @@ body {
 }
 
 .page {
-  --bg-base: #f6f1ec;
-  --bg-layer-1: #e8ddd7;
-  --bg-layer-2: #e8decb;
-  --card-bg: #fffaf6;
-  --card-border: #dccfc4;
-  --text-primary: #2f2624;
-  --text-secondary: #6c5f5b;
-  --btn-text: #f9f6f2;
-  --btn-start: #bf7b71;
-  --btn-end: #c2a166;
-  --btn-start-hover: #b97267;
-  --btn-end-hover: #bc995f;
-  --toggle-bg: #efe4da;
-  --toggle-border: #cfb9a6;
-  --toggle-text: #4b3a35;
+  --bg-main: #e7e1dc;
+  --bg-warm: #ddd1c5;
+  --bg-cool: #ddd8d2;
+  --panel-bg: #f3f0ed;
+  --panel-border: #d5cec6;
+  --text-main: #2b2728;
+  --text-sub: #6f6767;
+  --chip-bg: #f3efea;
+  --chip-border: #d4ccc3;
+  --chip-text: #403a38;
+  --mode-bg: #111117;
+  --mode-text: #efebe6;
+  --btn-primary-start: #be7f80;
+  --btn-primary-end: #c9a56f;
+  --btn-secondary-bg: #e7dcbf;
+  --btn-secondary-border: #d4c394;
+  --status-accent: #b4636a;
 
   min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  color: var(--text-primary);
+  padding: 26px 20px 34px;
+  color: var(--text-main);
   background:
-    radial-gradient(circle at 0% 0%, var(--bg-layer-1) 0, transparent 55%),
-    radial-gradient(circle at 100% 100%, var(--bg-layer-2) 0, transparent 55%),
-    var(--bg-base);
+    radial-gradient(circle at 8% 0%, var(--bg-warm) 0, transparent 56%),
+    radial-gradient(circle at 100% 100%, var(--bg-cool) 0, transparent 58%),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.02) 0,
+      rgba(255, 255, 255, 0.02) 1px,
+      transparent 1px,
+      transparent 6px
+    ),
+    var(--bg-main);
   transition: background 0.35s ease, color 0.35s ease;
 }
 
 .page[data-theme="night"] {
-  --bg-base: #23201f;
-  --bg-layer-1: #3a2f2c;
-  --bg-layer-2: #443a2a;
-  --card-bg: #2d2826;
-  --card-border: #4d413c;
-  --text-primary: #f3e7db;
-  --text-secondary: #cdb9ab;
-  --btn-text: #fbf5ef;
-  --btn-start: #9d645d;
-  --btn-end: #a78756;
-  --btn-start-hover: #a56b64;
-  --btn-end-hover: #b18e5b;
-  --toggle-bg: #3a302d;
-  --toggle-border: #5f4f48;
-  --toggle-text: #f0ded0;
+  --bg-main: #1f1d21;
+  --bg-warm: #372d2f;
+  --bg-cool: #2d2a33;
+  --panel-bg: #2a2a2f;
+  --panel-border: #403c47;
+  --text-main: #ece6df;
+  --text-sub: #c8bfb5;
+  --chip-bg: #2a2a30;
+  --chip-border: #4a4551;
+  --chip-text: #ece6df;
+  --mode-bg: #08090e;
+  --mode-text: #f0ebe5;
+  --btn-primary-start: #b77d76;
+  --btn-primary-end: #bf9d69;
+  --btn-secondary-bg: #4e4733;
+  --btn-secondary-border: #6b6142;
+  --status-accent: #d18d93;
 }
 
-.card {
-  width: 100%;
-  max-width: 420px;
-  padding: 24px;
-  border: 1px solid var(--card-border);
-  border-radius: 16px;
-  background: var(--card-bg);
-  box-shadow: 0 10px 24px rgba(19, 16, 14, 0.16);
-  transition: background 0.35s ease, border-color 0.35s ease;
+.app-shell {
+  width: min(920px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 22px;
 }
 
-.heading {
+.toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
-h1 {
-  margin: 0 0 10px;
-  font-size: 24px;
+.profile-chip {
+  flex: 1 0 250px;
+  min-height: 68px;
+  padding: 8px 16px 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 999px;
+  border: 1px solid var(--chip-border);
+  background: var(--chip-bg);
+  color: var(--chip-text);
+}
+
+.avatar-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  padding: 2px;
+  background: linear-gradient(145deg, #dbb180, #ad655e);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #f8f2ea;
+  color: #4f3430;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.profile-name {
+  font-size: 34px;
+  letter-spacing: 0.3px;
+}
+
+.mode-switch {
+  flex: 0 0 118px;
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: 999px;
+  background: rgba(235, 223, 194, 0.42);
+  padding: 8px 10px;
+  min-width: 118px;
+  min-height: 68px;
+  cursor: pointer;
+}
+
+.switch-track {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 50px;
+  border-radius: 999px;
+  padding: 4px;
+  background: linear-gradient(140deg, #e5d6ad, #c8b17b);
+}
+
+.switch-thumb {
+  display: block;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  background: #f3f1ec;
+  box-shadow: 0 3px 8px rgba(22, 18, 15, 0.2);
+  transform: translateX(0);
+  transition: transform 0.22s ease;
+}
+
+.switch-thumb.on {
+  transform: translateX(calc(100% - 4px));
+}
+
+.scene-pill {
+  flex: 0 0 72px;
+  width: 72px;
+  height: 96px;
+  border: none;
+  border-radius: 999px;
+  background: var(--mode-bg);
+  color: var(--mode-text);
+  font-size: 34px;
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: 4px;
+  cursor: pointer;
+}
+
+.icon-circle {
+  flex: 0 0 68px;
+  width: 68px;
+  height: 68px;
+  border-radius: 999px;
+  border: 1px solid var(--chip-border);
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  font-size: 34px;
+  cursor: pointer;
+}
+
+.panel {
+  border-radius: 30px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  box-shadow: 0 10px 22px rgba(26, 20, 15, 0.1);
+  padding: 28px;
+}
+
+.hero-panel h1 {
+  margin: 0 0 14px;
+  font-size: clamp(42px, 5.2vw, 70px);
+  line-height: 1.12;
 }
 
 .description {
-  margin: 0 0 18px;
-  color: var(--text-secondary);
-  font-size: 14px;
-  transition: color 0.35s ease;
+  margin: 0 0 22px;
+  font-size: clamp(17px, 2.8vw, 27px);
+  color: var(--text-sub);
 }
 
 .actions {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .actions button {
-  width: 100%;
+  min-height: 74px;
+  border-radius: 24px;
   border: none;
-  border-radius: 12px;
-  padding: 14px 16px;
-  font-size: 16px;
-  color: var(--btn-text);
-  background: linear-gradient(135deg, var(--btn-start), var(--btn-end));
+  padding: 0 20px;
+  font-family: "Source Han Serif SC", "Noto Serif SC", "STSong", serif;
+  font-size: clamp(20px, 3.6vw, 42px);
+  color: #f9f4ee;
+  background: linear-gradient(
+    110deg,
+    var(--btn-primary-start),
+    var(--btn-primary-end)
+  );
   cursor: pointer;
-  transition: opacity 0.2s ease, background 0.2s ease;
 }
 
-.actions button:hover:not(:disabled) {
-  background: linear-gradient(
-    135deg,
-    var(--btn-start-hover),
-    var(--btn-end-hover)
-  );
+.actions button:nth-child(2) {
+  color: #6d6142;
+  background: var(--btn-secondary-bg);
+  border: 2px solid var(--btn-secondary-border);
 }
 
 .actions button:disabled {
@@ -128,33 +244,58 @@ h1 {
   cursor: not-allowed;
 }
 
-.theme-toggle {
-  border: 1px solid var(--toggle-border);
-  border-radius: 999px;
-  background: var(--toggle-bg);
-  color: var(--toggle-text);
-  font-size: 13px;
-  padding: 8px 12px;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+.status-panel {
+  padding-top: 22px;
+  padding-bottom: 22px;
+}
+
+.status-title {
+  margin: 0 0 10px;
+  font-size: clamp(24px, 3.3vw, 40px);
+  color: var(--text-sub);
 }
 
 .message {
-  margin: 16px 0 0;
-  color: var(--text-primary);
-  font-size: 14px;
+  margin: 0;
+  font-size: clamp(26px, 4.4vw, 50px);
+  color: var(--status-accent);
+  font-weight: 700;
   word-break: break-word;
-  transition: color 0.35s ease;
 }
 
-@media (max-width: 440px) {
-  .heading {
-    flex-direction: column;
-    align-items: flex-start;
+@media (max-width: 520px) {
+  .page {
+    padding: 18px 12px 24px;
   }
 
-  .theme-toggle {
-    width: 100%;
+  .profile-name {
+    font-size: 24px;
+  }
+
+  .mode-switch {
+    min-width: 104px;
+    min-height: 60px;
+  }
+
+  .scene-pill {
+    width: 64px;
+    height: 82px;
+    font-size: 30px;
+  }
+
+  .icon-circle {
+    width: 58px;
+    height: 58px;
+    font-size: 28px;
+  }
+
+  .panel {
+    border-radius: 22px;
+    padding: 18px;
+  }
+
+  .actions button {
+    min-height: 62px;
+    border-radius: 18px;
   }
 }

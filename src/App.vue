@@ -1,40 +1,62 @@
 <template>
   <main class="page" :data-theme="theme">
-    <section class="card">
-      <div class="heading">
+    <div class="app-shell">
+      <header class="toolbar">
+        <div class="profile-chip">
+          <span class="avatar-wrap">
+            <span class="avatar">六字</span>
+          </span>
+          <span class="profile-name">系统页面入口</span>
+        </div>
+
+        <button type="button" class="mode-switch" @click="toggleTheme">
+          <span class="switch-track">
+            <span class="switch-thumb" :class="{ on: theme === 'night' }"></span>
+          </span>
+        </button>
+
+        <button type="button" class="scene-pill" @click="toggleTheme">
+          {{ theme === "day" ? "黑屏" : "白屏" }}
+        </button>
+
+        <button type="button" class="icon-circle" aria-label="说明">i</button>
+        <button type="button" class="icon-circle" aria-label="主页">⌂</button>
+      </header>
+
+      <section class="panel hero-panel">
         <h1>MIUI 系统页面 Launcher</h1>
-        <button type="button" class="theme-toggle" @click="toggleTheme">
-          {{ theme === "day" ? "切换到黑夜" : "切换到白天" }}
-        </button>
-      </div>
-      <p class="description">
-        验证普通第三方应用是否可通过 Intent 打开 MIUI 系统设置页面。
-      </p>
+        <p class="description">
+          验证普通第三方应用是否可通过 Intent 打开 MIUI 系统设置页面。
+        </p>
 
-      <div class="actions">
-        <button type="button" :disabled="isLoading" @click="openBootShutdownPage">
-          {{ loadingAction === "bootShutdown" ? "正在打开..." : "打开定时开关机页面" }}
-        </button>
+        <div class="actions">
+          <button type="button" :disabled="isLoading" @click="openBootShutdownPage">
+            {{ loadingAction === "bootShutdown" ? "正在打开..." : "打开定时开关机页面" }}
+          </button>
 
-        <button type="button" :disabled="isLoading" @click="openWirelessDebuggingPage">
-          {{
-            loadingAction === "wirelessDebugging"
-              ? "正在打开..."
-              : "打开无线调试页面"
-          }}
-        </button>
+          <button type="button" :disabled="isLoading" @click="openWirelessDebuggingPage">
+            {{
+              loadingAction === "wirelessDebugging"
+                ? "正在打开..."
+                : "打开无线调试页面"
+            }}
+          </button>
 
-        <button type="button" :disabled="isLoading" @click="openDeveloperOptionsPage">
-          {{
-            loadingAction === "developerOptions"
-              ? "正在打开..."
-              : "打开开发者选项"
-          }}
-        </button>
-      </div>
+          <button type="button" :disabled="isLoading" @click="openDeveloperOptionsPage">
+            {{
+              loadingAction === "developerOptions"
+                ? "正在打开..."
+                : "打开开发者选项"
+            }}
+          </button>
+        </div>
+      </section>
 
-      <p v-if="message" class="message">{{ message }}</p>
-    </section>
+      <section class="panel status-panel">
+        <p class="status-title">最近操作</p>
+        <p class="message">{{ displayMessage }}</p>
+      </section>
+    </div>
   </main>
 </template>
 
@@ -48,6 +70,9 @@ const loadingAction = ref<
 >("");
 const message = ref("");
 const isLoading = computed(() => loadingAction.value !== "");
+const displayMessage = computed(
+  () => message.value || "等待操作，请选择一个系统页面入口。",
+);
 
 function toggleTheme() {
   theme.value = theme.value === "day" ? "night" : "day";
