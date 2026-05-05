@@ -1,7 +1,12 @@
 <template>
-  <main class="page">
+  <main class="page" :data-theme="theme">
     <section class="card">
-      <h1>MIUI 系统页面 Launcher</h1>
+      <div class="heading">
+        <h1>MIUI 系统页面 Launcher</h1>
+        <button type="button" class="theme-toggle" @click="toggleTheme">
+          {{ theme === "day" ? "切换到黑夜" : "切换到白天" }}
+        </button>
+      </div>
       <p class="description">
         验证普通第三方应用是否可通过 Intent 打开 MIUI 系统设置页面。
       </p>
@@ -37,11 +42,16 @@
 import { computed, ref } from "vue";
 import { MiuiPower } from "./plugins/miuiPower";
 
+const theme = ref<"day" | "night">("day");
 const loadingAction = ref<
   "" | "bootShutdown" | "wirelessDebugging" | "developerOptions"
 >("");
 const message = ref("");
 const isLoading = computed(() => loadingAction.value !== "");
+
+function toggleTheme() {
+  theme.value = theme.value === "day" ? "night" : "day";
+}
 
 async function openBootShutdownPage() {
   loadingAction.value = "bootShutdown";
