@@ -52,8 +52,10 @@ Configure one reusable keystore and set these repository secrets or variables:
 
 File: `.github/workflows/android-release.yml`
 
-- Trigger: push to `main` or manual dispatch
-- Output: signed release APK artifact named `MiuiBootShutdownLauncher-vX.Y.Z.apk`
+- Trigger: push to `main`, push tag `v*`, or manual dispatch
+- Output:
+  - signed release APK artifact named `MiuiBootShutdownLauncher-vX.Y.Z.apk`
+  - auto-create/update GitHub Release when triggered by tag `v*`
 
 ### 2) Publish workflow
 

@@ -3,7 +3,11 @@ name: Build APK
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -68,9 +72,31 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/MiuiBootShutdownLauncher-v${{ steps.version.outputs.version_name }}.apk
 
+      - name: Validate tag version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$tag_version" != "${{ steps.version.outputs.version_name }}" ]; then
+            echo "Tag version (${tag_version}) does not match app version (${{ steps.version.outputs.version_name }})."
+            exit 1
+          fi
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: MiuiBootShutdownLauncher-v${{ steps.version.outputs.version_name }}.apk
           path: android/app/build/outputs/apk/release/MiuiBootShutdownLauncher-v${{ steps.version.outputs.version_name }}.apk
           if-no-files-found: error
+
+      - name: Create or update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: |
+            Automated release for ${{ github.ref_name }}.
+            Direct install file: MiuiBootShutdownLauncher-v${{ steps.version.outputs.version_name }}.apk
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: android/app/build/outputs/apk/release/MiuiBootShutdownLauncher-v${{ steps.version.outputs.version_name }}.apk
