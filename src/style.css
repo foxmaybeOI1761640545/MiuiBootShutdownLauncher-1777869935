@@ -231,6 +231,7 @@ body {
   font-size: clamp(26px, 4.4vw, 50px);
   color: var(--status-accent);
   font-weight: 700;
+  white-space: pre-wrap;
   word-break: break-word;
 }
 

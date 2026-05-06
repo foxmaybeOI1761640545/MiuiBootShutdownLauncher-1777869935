@@ -4,13 +4,17 @@ import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import kotlin.concurrent.thread
 
 @CapacitorPlugin(name = "MiuiPower")
 class MiuiPowerPlugin : Plugin() {
@@ -83,6 +87,73 @@ class MiuiPowerPlugin : Plugin() {
         }
 
         call.resolve(result(false, "none"))
+    }
+
+    @PluginMethod
+    fun hasOverlayPermission(call: PluginCall) {
+        call.resolve(JSObject().apply {
+            put("granted", canDrawOverlays(context))
+        })
+    }
+
+    @PluginMethod
+    fun openOverlayPermissionSettings(call: PluginCall) {
+        val opened = tryOpenOverlayPermissionSettings(context)
+        call.resolve(result(opened, if (opened) "manage_overlay_permission" else "none"))
+    }
+
+    @PluginMethod
+    fun startFocusOverlay(call: PluginCall) {
+        val ctx = context
+        if (!canDrawOverlays(ctx)) {
+            tryOpenOverlayPermissionSettings(ctx)
+            call.resolve(JSObject().apply {
+                put("ok", false)
+                put("method", "overlay_permission_required")
+                put("permissionRequired", true)
+            })
+            return
+        }
+
+        val intent = Intent(ctx, FocusOverlayService::class.java)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(ctx, intent)
+            } else {
+                ctx.startService(intent)
+            }
+            call.resolve(JSObject().apply {
+                put("ok", true)
+                put("method", "focus_overlay_service")
+                put("permissionRequired", false)
+            })
+        } catch (e: Exception) {
+            Log.w(TAG, "Focus overlay launch failed", e)
+            call.resolve(JSObject().apply {
+                put("ok", false)
+                put("method", "none")
+                put("permissionRequired", false)
+                put("error", e.message ?: e.javaClass.simpleName)
+            })
+        }
+    }
+
+    @PluginMethod
+    fun stopFocusOverlay(call: PluginCall) {
+        val intent = Intent(context, FocusOverlayService::class.java)
+        val stopped = context.stopService(intent)
+        call.resolve(JSObject().apply {
+            put("ok", stopped)
+            put("method", if (stopped) "focus_overlay_service" else "none")
+        })
+    }
+
+    @PluginMethod
+    fun getWindowFocusInfo(call: PluginCall) {
+        thread(name = "focus-window-reader-plugin") {
+            val info = FocusWindowReader.read()
+            call.resolve(info.toJSObject())
+        }
     }
 
     private fun tryOpenByAction(context: Context): Boolean {
@@ -171,6 +242,26 @@ class MiuiPowerPlugin : Plugin() {
             true
         } catch (e: Exception) {
             Log.w(TAG, "Developer options fallback launch failed", e)
+            false
+        }
+    }
+
+    private fun canDrawOverlays(context: Context): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(context)
+    }
+
+    private fun tryOpenOverlayPermissionSettings(context: Context): Boolean {
+        return try {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${context.packageName}"),
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Overlay permission settings launch failed", e)
             false
         }
     }

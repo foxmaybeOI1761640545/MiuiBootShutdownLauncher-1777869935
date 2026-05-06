@@ -42,6 +42,26 @@
                 : "打开开发者选项"
             }}
           </button>
+
+          <button type="button" :disabled="isLoading" @click="startFocusOverlay">
+            {{
+              loadingAction === "focusOverlay"
+                ? "正在启动..."
+                : "启动焦点悬浮按钮"
+            }}
+          </button>
+
+          <button type="button" :disabled="isLoading" @click="getWindowFocusInfo">
+            {{
+              loadingAction === "windowFocus"
+                ? "正在读取..."
+                : "立即读取窗口焦点"
+            }}
+          </button>
+
+          <button type="button" :disabled="isLoading" @click="stopFocusOverlay">
+            关闭焦点悬浮按钮
+          </button>
         </div>
       </section>
 
@@ -59,7 +79,12 @@ import { MiuiPower } from "./plugins/miuiPower";
 
 const theme = ref<"day" | "night">("day");
 const loadingAction = ref<
-  "" | "bootShutdown" | "wirelessDebugging" | "developerOptions"
+  ""
+  | "bootShutdown"
+  | "wirelessDebugging"
+  | "developerOptions"
+  | "focusOverlay"
+  | "windowFocus"
 >("");
 const message = ref("");
 const isLoading = computed(() => loadingAction.value !== "");
@@ -129,5 +154,61 @@ async function openDeveloperOptionsPage() {
   } finally {
     loadingAction.value = "";
   }
+}
+
+async function startFocusOverlay() {
+  loadingAction.value = "focusOverlay";
+  message.value = "";
+
+  try {
+    const result = await MiuiPower.startFocusOverlay();
+    if (result.ok) {
+      message.value = "已启动全局焦点悬浮按钮，点击按钮会读取并复制窗口焦点信息。";
+    } else if (result.permissionRequired) {
+      message.value = "需要先授予“显示在其他应用上层”权限，已尝试打开授权页。";
+    } else {
+      message.value = result.error || "无法启动焦点悬浮按钮";
+    }
+  } catch (error) {
+    message.value = getErrorMessage(error) || "无法启动焦点悬浮按钮";
+  } finally {
+    loadingAction.value = "";
+  }
+}
+
+async function stopFocusOverlay() {
+  message.value = "";
+
+  try {
+    const result = await MiuiPower.stopFocusOverlay();
+    message.value = result.ok ? "已关闭焦点悬浮按钮" : "焦点悬浮按钮当前未运行";
+  } catch (error) {
+    message.value = getErrorMessage(error) || "无法关闭焦点悬浮按钮";
+  }
+}
+
+async function getWindowFocusInfo() {
+  loadingAction.value = "windowFocus";
+  message.value = "";
+
+  try {
+    const result = await MiuiPower.getWindowFocusInfo();
+    if (result.ok) {
+      message.value = result.lines.join("\n");
+    } else {
+      const detail = result.lines.length > 0 ? `\n${result.lines.join("\n")}` : "";
+      message.value = `${result.error || "读取窗口焦点失败"}${detail}`;
+    }
+  } catch (error) {
+    message.value = getErrorMessage(error) || "读取窗口焦点失败";
+  } finally {
+    loadingAction.value = "";
+  }
+}
+
+function getErrorMessage(error: unknown) {
+  return typeof error === "object" && error !== null && "message" in error
+    ? String((error as { message?: string }).message ?? "")
+    : "";
 }
 </script>
