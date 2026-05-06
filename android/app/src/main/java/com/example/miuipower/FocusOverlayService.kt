@@ -134,8 +134,14 @@ class FocusOverlayService : Service() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.rgb(240, 238, 236))
-            addView(scroll, LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
-            addView(close, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(
+                close,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
         }
 
         val params = WindowManager.LayoutParams(
