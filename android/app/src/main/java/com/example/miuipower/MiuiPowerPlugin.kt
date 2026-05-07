@@ -27,15 +27,26 @@ class MiuiPowerPlugin : Plugin() {
         private const val ACTION_BOOT_SHUTDOWN =
             "miui.powercenter.intent.action.BOOT_SHUTDOWN_ONTIME"
         private const val ACTION_POWER_MANAGER = "miui.intent.action.POWER_MANAGER"
+        private const val ACTION_MIUI_SCREEN_REFRESH_RATE = "miui.intent.action.DISPLAY_REFRESH_RATE"
+        private const val ACTION_DISPLAY_SETTINGS = Settings.ACTION_DISPLAY_SETTINGS
         private const val PKG_SETTINGS = "com.android.settings"
         private const val ACTIVITY_SUB_SETTINGS = "com.android.settings.SubSettings"
+        private const val PKG_HONOR_OF_KINGS = "com.tencent.tmgp.sgame"
         private const val EXTRA_SHOW_FRAGMENT = ":settings:show_fragment"
         private const val EXTRA_SHOW_FRAGMENT_TITLE = ":settings:show_fragment_title"
         private const val EXTRA_SOURCE_METRICS = ":settings:source_metrics"
         private const val FRAGMENT_WIRELESS_DEBUGGING =
             "com.android.settings.development.WirelessDebuggingFragment"
+        private val FRAGMENTS_SCREEN_REFRESH_RATE = listOf(
+            "com.android.settings.display.RefreshRateSettings",
+            "com.android.settings.display.ScreenRefreshRateFragment",
+            "com.android.settings.display.RefreshRateFragment",
+            "com.android.settings.display.SmoothDisplayFragment",
+        )
         private const val TITLE_WIRELESS_DEBUGGING = "无线调试"
+        private const val TITLE_SCREEN_REFRESH_RATE = "屏幕刷新率"
         private const val SOURCE_METRICS_WIRELESS_DEBUGGING = 1839
+        private const val SOURCE_METRICS_SCREEN_REFRESH_RATE = 746
     }
 
     @PluginMethod
@@ -87,6 +98,64 @@ class MiuiPowerPlugin : Plugin() {
         }
 
         call.resolve(result(false, "none"))
+    }
+
+    @PluginMethod
+    fun openScreenRefreshRatePage(call: PluginCall) {
+        val ctx = context
+
+        if (tryOpenScreenRefreshRateByAction(ctx)) {
+            call.resolve(result(true, "miui_refresh_rate_action"))
+            return
+        }
+
+        if (tryOpenScreenRefreshRateByFragment(ctx)) {
+            call.resolve(result(true, "refresh_rate_fragment"))
+            return
+        }
+
+        if (tryOpenDisplaySettings(ctx)) {
+            call.resolve(result(true, "display_settings"))
+            return
+        }
+
+        call.resolve(result(false, "none"))
+    }
+
+    @PluginMethod
+    fun openHonorOfKings(call: PluginCall) {
+        val ctx = context
+        val launchIntent = ctx.packageManager.getLaunchIntentForPackage(PKG_HONOR_OF_KINGS)
+
+        if (launchIntent == null) {
+            call.resolve(JSObject().apply {
+                put("ok", false)
+                put("method", "none")
+                put("installed", false)
+                put("packageName", PKG_HONOR_OF_KINGS)
+            })
+            return
+        }
+
+        try {
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ctx.startActivity(launchIntent)
+            call.resolve(JSObject().apply {
+                put("ok", true)
+                put("method", "package_launch_intent")
+                put("installed", true)
+                put("packageName", PKG_HONOR_OF_KINGS)
+            })
+        } catch (e: Exception) {
+            Log.w(TAG, "Honor of Kings launch failed", e)
+            call.resolve(JSObject().apply {
+                put("ok", false)
+                put("method", "none")
+                put("installed", true)
+                put("packageName", PKG_HONOR_OF_KINGS)
+                put("error", e.message ?: e.javaClass.simpleName)
+            })
+        }
     }
 
     @PluginMethod
@@ -297,6 +366,57 @@ class MiuiPowerPlugin : Plugin() {
             true
         } catch (e: Exception) {
             Log.w(TAG, "Developer options fallback launch failed", e)
+            false
+        }
+    }
+
+    private fun tryOpenScreenRefreshRateByAction(context: Context): Boolean {
+        return try {
+            val intent = Intent(ACTION_MIUI_SCREEN_REFRESH_RATE).apply {
+                addCategory(Intent.CATEGORY_DEFAULT)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "MIUI refresh-rate action launch failed", e)
+            false
+        }
+    }
+
+    private fun tryOpenScreenRefreshRateByFragment(context: Context): Boolean {
+        for (fragment in FRAGMENTS_SCREEN_REFRESH_RATE) {
+            val opened = try {
+                val intent = Intent().apply {
+                    component = ComponentName(PKG_SETTINGS, ACTIVITY_SUB_SETTINGS)
+                    putExtra(EXTRA_SHOW_FRAGMENT, fragment)
+                    putExtra(EXTRA_SHOW_FRAGMENT_TITLE, TITLE_SCREEN_REFRESH_RATE)
+                    putExtra(EXTRA_SOURCE_METRICS, SOURCE_METRICS_SCREEN_REFRESH_RATE)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                true
+            } catch (e: Exception) {
+                Log.w(TAG, "Refresh-rate fragment launch failed: $fragment", e)
+                false
+            }
+
+            if (opened) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun tryOpenDisplaySettings(context: Context): Boolean {
+        return try {
+            val intent = Intent(ACTION_DISPLAY_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Display settings fallback launch failed", e)
             false
         }
     }

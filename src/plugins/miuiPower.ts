@@ -15,6 +15,19 @@ export interface OpenDeveloperOptionsResult {
   method: "application_development_settings" | "none";
 }
 
+export interface OpenScreenRefreshRateResult {
+  ok: boolean;
+  method: "miui_refresh_rate_action" | "refresh_rate_fragment" | "display_settings" | "none";
+}
+
+export interface OpenHonorOfKingsResult {
+  ok: boolean;
+  method: "package_launch_intent" | "none";
+  installed: boolean;
+  packageName: string;
+  error?: string;
+}
+
 export interface OverlayPermissionResult {
   granted: boolean;
 }
@@ -62,6 +75,8 @@ export interface MiuiPowerPlugin {
   openBootShutdownPage(): Promise<OpenBootShutdownResult>;
   openWirelessDebuggingPage(): Promise<OpenWirelessDebuggingResult>;
   openDeveloperOptions(): Promise<OpenDeveloperOptionsResult>;
+  openScreenRefreshRatePage(): Promise<OpenScreenRefreshRateResult>;
+  openHonorOfKings(): Promise<OpenHonorOfKingsResult>;
   hasOverlayPermission(): Promise<OverlayPermissionResult>;
   hasAccessibilityPermission(): Promise<AccessibilityPermissionResult>;
   openOverlayPermissionSettings(): Promise<FocusOverlayResult>;

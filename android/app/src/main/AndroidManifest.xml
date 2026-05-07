@@ -4,6 +4,7 @@
     <queries>
         <package android:name="com.miui.securitycenter" />
         <package android:name="com.android.settings" />
+        <package android:name="com.tencent.tmgp.sgame" />
 
         <intent>
             <action android:name="miui.powercenter.intent.action.BOOT_SHUTDOWN_ONTIME" />
@@ -15,6 +16,14 @@
 
         <intent>
             <action android:name="android.settings.APPLICATION_DEVELOPMENT_SETTINGS" />
+        </intent>
+
+        <intent>
+            <action android:name="miui.intent.action.DISPLAY_REFRESH_RATE" />
+        </intent>
+
+        <intent>
+            <action android:name="android.settings.DISPLAY_SETTINGS" />
         </intent>
     </queries>
 

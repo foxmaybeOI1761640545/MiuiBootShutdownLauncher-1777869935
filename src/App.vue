@@ -43,6 +43,22 @@
             }}
           </button>
 
+          <button type="button" :disabled="isLoading" @click="openScreenRefreshRatePage">
+            {{
+              loadingAction === "screenRefreshRate"
+                ? "正在打开..."
+                : "打开屏幕刷新率设置"
+            }}
+          </button>
+
+          <button type="button" :disabled="isLoading" @click="openHonorOfKings">
+            {{
+              loadingAction === "honorOfKings"
+                ? "正在启动..."
+                : "启动王者荣耀"
+            }}
+          </button>
+
           <button type="button" :disabled="isLoading" @click="startFocusOverlay">
             {{
               loadingAction === "focusOverlay"
@@ -91,6 +107,8 @@ const loadingAction = ref<
   | "bootShutdown"
   | "wirelessDebugging"
   | "developerOptions"
+  | "screenRefreshRate"
+  | "honorOfKings"
   | "focusOverlay"
   | "accessibility"
   | "windowFocus"
@@ -160,6 +178,46 @@ async function openDeveloperOptionsPage() {
         ? String((error as { message?: string }).message ?? "")
         : "";
     message.value = maybeMessage || "无法打开开发者选项";
+  } finally {
+    loadingAction.value = "";
+  }
+}
+
+async function openScreenRefreshRatePage() {
+  loadingAction.value = "screenRefreshRate";
+  message.value = "";
+
+  try {
+    const result = await MiuiPower.openScreenRefreshRatePage();
+    message.value = result.ok
+      ? `已尝试打开屏幕刷新率设置，方式：${result.method}`
+      : "无法打开屏幕刷新率设置";
+  } catch (error) {
+    const maybeMessage =
+      typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message?: string }).message ?? "")
+        : "";
+    message.value = maybeMessage || "无法打开屏幕刷新率设置";
+  } finally {
+    loadingAction.value = "";
+  }
+}
+
+async function openHonorOfKings() {
+  loadingAction.value = "honorOfKings";
+  message.value = "";
+
+  try {
+    const result = await MiuiPower.openHonorOfKings();
+    if (result.ok) {
+      message.value = "已尝试启动王者荣耀";
+    } else if (!result.installed) {
+      message.value = "未检测到王者荣耀（com.tencent.tmgp.sgame）已安装";
+    } else {
+      message.value = result.error || "无法启动王者荣耀";
+    }
+  } catch (error) {
+    message.value = getErrorMessage(error) || "无法启动王者荣耀";
   } finally {
     loadingAction.value = "";
   }
