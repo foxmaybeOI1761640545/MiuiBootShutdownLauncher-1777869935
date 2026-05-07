@@ -11,9 +11,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
@@ -24,11 +22,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
-import kotlin.concurrent.thread
 
 class FocusOverlayService : Service() {
     private lateinit var windowManager: WindowManager
-    private val mainHandler = Handler(Looper.getMainLooper())
     private var buttonView: TextView? = null
     private var panelView: View? = null
 
@@ -88,25 +84,26 @@ class FocusOverlayService : Service() {
     }
 
     private fun refreshFocusInfo() {
-        Toast.makeText(this, "正在读取 dumpsys window...", Toast.LENGTH_SHORT).show()
-        thread(name = "focus-window-reader") {
-            val result = FocusWindowReader.read()
-            mainHandler.post {
-                val text = if (result.ok) {
-                    result.lines.joinToString("\n")
-                } else {
-                    buildString {
-                        appendLine(result.error.ifBlank { "读取失败" })
-                        result.lines.takeIf { it.isNotEmpty() }?.let {
-                            appendLine()
-                            append(it.joinToString("\n"))
-                        }
-                    }.trim()
-                }
-                copyResult(text)
-                showPanel(text.ifBlank { "没有可展示的焦点窗口信息" })
-            }
+        Toast.makeText(this, "正在读取焦点信息...", Toast.LENGTH_SHORT).show()
+
+        val text = FocusInfoRepository.readLatestExternal()?.toDisplayText()
+            ?: buildNoFocusText()
+
+        copyResult(text)
+        showPanel(text.ifBlank { "没有可展示的焦点窗口信息" })
+    }
+
+    private fun buildNoFocusText(): String {
+        if (!FocusAccessibilityHelper.isServiceEnabled(this)) {
+            return "未开启无障碍服务，请到系统设置中启用 MIUI Power Launcher 的无障碍权限。"
         }
+
+        val latestSeen = FocusInfoRepository.readLatestSeen()
+        if (latestSeen?.packageName == packageName) {
+            return "最近一次窗口焦点来自本应用，已自动过滤。请先切换到目标应用再点击悬浮按钮。"
+        }
+
+        return "暂未捕获到外部窗口焦点。请先切换到目标应用页面，等待 1-2 秒后重试。"
     }
 
     private fun showPanel(text: String) {
@@ -224,7 +221,7 @@ class FocusOverlayService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(applicationInfo.icon)
             .setContentTitle("焦点窗口悬浮按钮")
-            .setContentText("点击悬浮按钮读取 mCurrentFocus / mFocusedApp")
+            .setContentText("点击悬浮按钮读取无障碍缓存的前台窗口信息")
             .setOngoing(true)
             .build()
     }

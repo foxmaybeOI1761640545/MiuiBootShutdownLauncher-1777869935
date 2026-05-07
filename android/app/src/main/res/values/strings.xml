@@ -4,4 +4,5 @@
     <string name="title_activity_main">MIUI Power Launcher</string>
     <string name="package_name">com.example.miuipower</string>
     <string name="custom_url_scheme">com.example.miuipower</string>
+    <string name="focus_accessibility_service_description">Capture active window info for focus overlay debugging.</string>
 </resources>

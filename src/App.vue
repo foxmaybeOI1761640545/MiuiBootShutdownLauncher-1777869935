@@ -51,6 +51,14 @@
             }}
           </button>
 
+          <button type="button" :disabled="isLoading" @click="openAccessibilitySettings">
+            {{
+              loadingAction === "accessibility"
+                ? "正在打开..."
+                : "打开无障碍设置"
+            }}
+          </button>
+
           <button type="button" :disabled="isLoading" @click="getWindowFocusInfo">
             {{
               loadingAction === "windowFocus"
@@ -84,6 +92,7 @@ const loadingAction = ref<
   | "wirelessDebugging"
   | "developerOptions"
   | "focusOverlay"
+  | "accessibility"
   | "windowFocus"
 >("");
 const message = ref("");
@@ -162,15 +171,32 @@ async function startFocusOverlay() {
 
   try {
     const result = await MiuiPower.startFocusOverlay();
-    if (result.ok) {
-      message.value = "已启动全局焦点悬浮按钮，点击按钮会读取并复制窗口焦点信息。";
-    } else if (result.permissionRequired) {
+    if (result.overlayPermissionRequired || result.permissionRequired) {
       message.value = "需要先授予“显示在其他应用上层”权限，已尝试打开授权页。";
+    } else if (result.ok && result.accessibilityPermissionRequired) {
+      message.value =
+        "悬浮按钮已启动，但未开启无障碍服务；已尝试打开无障碍设置。请开启后再读取焦点。";
+    } else if (result.ok) {
+      message.value = "已启动全局焦点悬浮按钮，点击按钮会读取并复制窗口焦点信息。";
     } else {
       message.value = result.error || "无法启动焦点悬浮按钮";
     }
   } catch (error) {
     message.value = getErrorMessage(error) || "无法启动焦点悬浮按钮";
+  } finally {
+    loadingAction.value = "";
+  }
+}
+
+async function openAccessibilitySettings() {
+  loadingAction.value = "accessibility";
+  message.value = "";
+
+  try {
+    const result = await MiuiPower.openAccessibilitySettings();
+    message.value = result.ok ? "已打开无障碍设置" : "无法打开无障碍设置";
+  } catch (error) {
+    message.value = getErrorMessage(error) || "无法打开无障碍设置";
   } finally {
     loadingAction.value = "";
   }

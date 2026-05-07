@@ -19,21 +19,43 @@ export interface OverlayPermissionResult {
   granted: boolean;
 }
 
+export interface AccessibilityPermissionResult {
+  granted: boolean;
+}
+
 export interface FocusOverlayResult {
   ok: boolean;
-  method: "focus_overlay_service" | "overlay_permission_required" | "manage_overlay_permission" | "none";
+  method:
+    | "focus_overlay_service"
+    | "overlay_permission_required"
+    | "manage_overlay_permission"
+    | "accessibility_settings"
+    | "none";
   permissionRequired?: boolean;
+  overlayPermissionRequired?: boolean;
+  accessibilityPermissionRequired?: boolean;
+  accessibilityEnabled?: boolean;
+  accessibilitySettingsOpened?: boolean;
+  overlaySettingsOpened?: boolean;
   error?: string;
 }
 
 export interface WindowFocusInfoResult {
   ok: boolean;
+  source?: string;
   command: string;
   lines: string[];
   raw: string;
   error: string;
   exitCode: number;
   timedOut: boolean;
+  elapsedMs?: number;
+  packageName?: string;
+  className?: string;
+  windowTitle?: string;
+  texts?: string[];
+  timestamp?: number;
+  accessibilityEnabled?: boolean;
 }
 
 export interface MiuiPowerPlugin {
@@ -41,7 +63,9 @@ export interface MiuiPowerPlugin {
   openWirelessDebuggingPage(): Promise<OpenWirelessDebuggingResult>;
   openDeveloperOptions(): Promise<OpenDeveloperOptionsResult>;
   hasOverlayPermission(): Promise<OverlayPermissionResult>;
+  hasAccessibilityPermission(): Promise<AccessibilityPermissionResult>;
   openOverlayPermissionSettings(): Promise<FocusOverlayResult>;
+  openAccessibilitySettings(): Promise<FocusOverlayResult>;
   startFocusOverlay(): Promise<FocusOverlayResult>;
   stopFocusOverlay(): Promise<FocusOverlayResult>;
   getWindowFocusInfo(): Promise<WindowFocusInfoResult>;

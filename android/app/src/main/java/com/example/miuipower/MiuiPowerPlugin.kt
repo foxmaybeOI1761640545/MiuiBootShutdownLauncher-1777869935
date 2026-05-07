@@ -97,25 +97,48 @@ class MiuiPowerPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun hasAccessibilityPermission(call: PluginCall) {
+        call.resolve(JSObject().apply {
+            put("granted", FocusAccessibilityHelper.isServiceEnabled(context))
+        })
+    }
+
+    @PluginMethod
     fun openOverlayPermissionSettings(call: PluginCall) {
         val opened = tryOpenOverlayPermissionSettings(context)
         call.resolve(result(opened, if (opened) "manage_overlay_permission" else "none"))
     }
 
     @PluginMethod
+    fun openAccessibilitySettings(call: PluginCall) {
+        val opened = FocusAccessibilityHelper.openAccessibilitySettings(context)
+        call.resolve(result(opened, if (opened) "accessibility_settings" else "none"))
+    }
+
+    @PluginMethod
     fun startFocusOverlay(call: PluginCall) {
         val ctx = context
         if (!canDrawOverlays(ctx)) {
-            tryOpenOverlayPermissionSettings(ctx)
+            val overlayOpened = tryOpenOverlayPermissionSettings(ctx)
             call.resolve(JSObject().apply {
                 put("ok", false)
                 put("method", "overlay_permission_required")
                 put("permissionRequired", true)
+                put("overlayPermissionRequired", true)
+                put("overlaySettingsOpened", overlayOpened)
+                put("accessibilityPermissionRequired", false)
             })
             return
         }
 
         val intent = Intent(ctx, FocusOverlayService::class.java)
+        val accessibilityEnabled = FocusAccessibilityHelper.isServiceEnabled(ctx)
+        val accessibilitySettingsOpened = if (!accessibilityEnabled) {
+            FocusAccessibilityHelper.openAccessibilitySettings(ctx)
+        } else {
+            false
+        }
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ContextCompat.startForegroundService(ctx, intent)
@@ -126,6 +149,10 @@ class MiuiPowerPlugin : Plugin() {
                 put("ok", true)
                 put("method", "focus_overlay_service")
                 put("permissionRequired", false)
+                put("overlayPermissionRequired", false)
+                put("accessibilityEnabled", accessibilityEnabled)
+                put("accessibilityPermissionRequired", !accessibilityEnabled)
+                put("accessibilitySettingsOpened", accessibilitySettingsOpened)
             })
         } catch (e: Exception) {
             Log.w(TAG, "Focus overlay launch failed", e)
@@ -133,6 +160,8 @@ class MiuiPowerPlugin : Plugin() {
                 put("ok", false)
                 put("method", "none")
                 put("permissionRequired", false)
+                put("overlayPermissionRequired", false)
+                put("accessibilityPermissionRequired", false)
                 put("error", e.message ?: e.javaClass.simpleName)
             })
         }
@@ -151,8 +180,34 @@ class MiuiPowerPlugin : Plugin() {
     @PluginMethod
     fun getWindowFocusInfo(call: PluginCall) {
         thread(name = "focus-window-reader-plugin") {
-            val info = FocusWindowReader.read()
-            call.resolve(info.toJSObject())
+            FocusInfoRepository.readLatestExternal()?.let { info ->
+                call.resolve(info.toWindowFocusResult())
+                return@thread
+            }
+
+            val latestSeen = FocusInfoRepository.readLatestSeen()
+            val shellInfo = FocusWindowReader.read()
+            val result = shellInfo.toJSObject().apply {
+                put("source", "shell_dumpsys")
+                put("accessibilityEnabled", FocusAccessibilityHelper.isServiceEnabled(context))
+                put("latestSeenPackage", latestSeen?.packageName ?: "")
+                put("latestSeenClass", latestSeen?.className ?: "")
+            }
+
+            val shellError = shellInfo.error.takeIf { it.isNotBlank() }
+            if (shellError != null) {
+                val message = buildString {
+                    append("无障碍缓存中暂无可用外部窗口")
+                    if (!FocusAccessibilityHelper.isServiceEnabled(context)) {
+                        append("，请先开启无障碍服务")
+                    }
+                    append("；shell 调试信息：")
+                    append(shellError)
+                }
+                result.put("error", message)
+            }
+
+            call.resolve(result)
         }
     }
 

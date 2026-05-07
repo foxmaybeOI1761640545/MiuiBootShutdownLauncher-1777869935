@@ -7,7 +7,15 @@ import java.util.concurrent.TimeUnit
 object FocusWindowReader {
     private const val COMMAND = "dumpsys window"
     private const val MAX_OUTPUT_CHARS = 1_000_000
-    private val focusPatterns = listOf("mCurrentFocus", "mFocusedApp")
+    private val focusPatterns = listOf(
+        "mCurrentFocus",
+        "mFocusedApp",
+        "mFocusedWindow",
+        "mResumedActivity",
+        "topResumedActivity",
+        "mInputMethodTarget",
+        "mActivityRecord",
+    )
 
     data class Result(
         val ok: Boolean,
@@ -17,6 +25,7 @@ object FocusWindowReader {
         val error: String,
         val exitCode: Int,
         val timedOut: Boolean,
+        val elapsedMs: Long,
     ) {
         fun toJSObject(): JSObject {
             val jsLines = JSArray()
@@ -29,11 +38,13 @@ object FocusWindowReader {
                 put("error", error)
                 put("exitCode", exitCode)
                 put("timedOut", timedOut)
+                put("elapsedMs", elapsedMs)
             }
         }
     }
 
     fun read(): Result {
+        val startMs = System.currentTimeMillis()
         val output = StringBuilder()
         var exitCode = -1
         var timedOut = false
@@ -62,7 +73,12 @@ object FocusWindowReader {
             }
             readerThread.join(500)
 
-            fromOutput(output.toString(), exitCode, timedOut)
+            fromOutput(
+                raw = output.toString(),
+                exitCode = exitCode,
+                timedOut = timedOut,
+                elapsedMs = System.currentTimeMillis() - startMs,
+            )
         } catch (e: Exception) {
             Result(
                 ok = false,
@@ -72,11 +88,12 @@ object FocusWindowReader {
                 error = e.message ?: e.javaClass.simpleName,
                 exitCode = exitCode,
                 timedOut = timedOut,
+                elapsedMs = System.currentTimeMillis() - startMs,
             )
         }
     }
 
-    private fun fromOutput(raw: String, exitCode: Int, timedOut: Boolean): Result {
+    private fun fromOutput(raw: String, exitCode: Int, timedOut: Boolean, elapsedMs: Long): Result {
         val lines = raw.lineSequence()
             .map { it.trim() }
             .filter { line ->
@@ -89,7 +106,7 @@ object FocusWindowReader {
             raw.contains("Permission Denial", ignoreCase = true) ->
                 "普通应用通常没有 android.permission.DUMP，无法读取完整 dumpsys window"
             exitCode != 0 -> "dumpsys window 返回非 0 状态：$exitCode"
-            lines.isEmpty() -> "没有匹配到 mCurrentFocus 或 mFocusedApp"
+            lines.isEmpty() -> "没有匹配到焦点相关字段（mCurrentFocus / mFocusedApp 等）"
             else -> ""
         }
 
@@ -101,6 +118,7 @@ object FocusWindowReader {
             error = error,
             exitCode = exitCode,
             timedOut = timedOut,
+            elapsedMs = elapsedMs,
         )
     }
 }
