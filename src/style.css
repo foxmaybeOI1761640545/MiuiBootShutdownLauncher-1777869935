@@ -204,10 +204,38 @@ body {
   cursor: pointer;
 }
 
-.actions button:nth-child(2) {
-  color: var(--btn-secondary-text);
-  background: var(--btn-secondary-bg);
-  border: 2px solid var(--btn-secondary-border);
+.actions.compact {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.actions.compact button {
+  min-height: 52px;
+  border-radius: 16px;
+  padding: 10px 12px;
+  font-size: clamp(15px, 2.2vw, 20px);
+  line-height: 1.35;
+}
+
+.entry-title {
+  margin: 0 0 14px;
+  font-size: clamp(22px, 3.3vw, 34px);
+}
+
+.entry-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.entry-group {
+  display: grid;
+  gap: 10px;
+}
+
+.entry-group h3 {
+  margin: 0;
+  font-size: clamp(18px, 2.8vw, 24px);
+  color: var(--text-sub);
 }
 
 .actions button:disabled {

@@ -33,6 +33,15 @@ export interface OpenHonorOfKingsResult {
   error?: string;
 }
 
+export interface OpenAppCommandResult {
+  ok: boolean;
+  method: string;
+  installed?: boolean;
+  packageName?: string;
+  error?: string;
+  url?: string;
+}
+
 export interface OverlayPermissionResult {
   granted: boolean;
 }
@@ -82,6 +91,47 @@ export interface MiuiPowerPlugin {
   openDeveloperOptions(): Promise<OpenDeveloperOptionsResult>;
   openScreenRefreshRatePage(): Promise<OpenScreenRefreshRateResult>;
   openHonorOfKings(): Promise<OpenHonorOfKingsResult>;
+  openScreenTimePage(): Promise<OpenAppCommandResult>;
+  openUsageAccessSettings(): Promise<OpenAppCommandResult>;
+  openFileManager(): Promise<OpenAppCommandResult>;
+  pickFile(): Promise<OpenAppCommandResult>;
+  pickFolder(): Promise<OpenAppCommandResult>;
+  openChrome(): Promise<OpenAppCommandResult>;
+  openUrl(options: { url: string; packageName?: string }): Promise<OpenAppCommandResult>;
+  openChromeIncognitoBestEffort(): Promise<OpenAppCommandResult>;
+  openAmap(): Promise<OpenAppCommandResult>;
+  openMapLocation(options: {
+    lat: number;
+    lng: number;
+    name?: string;
+  }): Promise<OpenAppCommandResult>;
+  openNavigation(options: {
+    lat: number;
+    lng: number;
+    name?: string;
+  }): Promise<OpenAppCommandResult>;
+  openMapSearch(options: { keyword: string }): Promise<OpenAppCommandResult>;
+  openKeep(): Promise<OpenAppCommandResult>;
+  openQQMusic(): Promise<OpenAppCommandResult>;
+  openMusicLink(options: { url: string }): Promise<OpenAppCommandResult>;
+  openWeChat(): Promise<OpenAppCommandResult>;
+  shareText(options: { text: string }): Promise<OpenAppCommandResult>;
+  shareUrl(options: { url: string }): Promise<OpenAppCommandResult>;
+  openClash(): Promise<OpenAppCommandResult>;
+  openGallery(): Promise<OpenAppCommandResult>;
+  pickImage(): Promise<OpenAppCommandResult>;
+  pickVideo(): Promise<OpenAppCommandResult>;
+  openBilibili(): Promise<OpenAppCommandResult>;
+  openBiliUrl(options: { url: string }): Promise<OpenAppCommandResult>;
+  openAuthenticator(): Promise<OpenAppCommandResult>;
+  openRecorder(): Promise<OpenAppCommandResult>;
+  recordSound(): Promise<OpenAppCommandResult>;
+  openWeather(): Promise<OpenAppCommandResult>;
+  openCamera(): Promise<OpenAppCommandResult>;
+  takePhoto(): Promise<OpenAppCommandResult>;
+  takeVideo(): Promise<OpenAppCommandResult>;
+  openDoubao(): Promise<OpenAppCommandResult>;
+  shareToDoubao(options: { text: string }): Promise<OpenAppCommandResult>;
   hasOverlayPermission(): Promise<OverlayPermissionResult>;
   hasAccessibilityPermission(): Promise<AccessibilityPermissionResult>;
   openOverlayPermissionSettings(): Promise<FocusOverlayResult>;
