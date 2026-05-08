@@ -1,66 +1,71 @@
-﻿<template>
-  <main class="page" :data-theme="theme">
-    <div class="app-shell">
-      <header class="toolbar">
-        <div class="profile-chip">
-          <span class="avatar-wrap">
-            <span class="avatar">MIUI</span>
-          </span>
-          <span class="profile-name">Intent Launcher</span>
-        </div>
-
-        <button type="button" class="mode-switch" @click="toggleTheme">
-          <span class="switch-track">
-            <span class="switch-thumb" :class="{ on: theme === 'night' }"></span>
-          </span>
-        </button>
+<template>
+  <main class="page">
+    <section class="launcher-shell">
+      <header class="app-header">
+        <h1>Launcher</h1>
       </header>
 
-      <section class="panel hero-panel">
-        <h1>MIUI System Entry Launcher</h1>
-        <p class="description">
-          普通权限场景（无 root / 无 ADB / 无系统签名）下的 Intent 入口实验面板。
-        </p>
-
-        <h2 class="entry-title">原有系统能力</h2>
-        <div class="actions compact">
-          <button
-            v-for="action in coreActions"
-            :key="action.key"
-            type="button"
-            :disabled="isLoading"
-            @click="action.run"
-          >
-            {{ buttonLabel(action) }}
-          </button>
-        </div>
-      </section>
-
-      <section class="panel entry-panel">
-        <h2 class="entry-title">补充应用入口按键</h2>
-        <div class="entry-groups">
-          <article class="entry-group" v-for="group in entryGroups" :key="group.title">
-            <h3>{{ group.title }}</h3>
-            <div class="actions compact">
+      <section class="action-stage">
+        <article class="primary-panel">
+          <div class="action-rows">
+            <div class="action-row" v-for="(row, rowIndex) in activeRows" :key="`${activePage}-${rowIndex}`">
               <button
-                v-for="action in group.actions"
-                :key="action.key"
+                v-for="cell in row"
+                :key="cell.key"
                 type="button"
-                :disabled="isLoading"
-                @click="action.run"
+                class="action-btn"
+                :class="[
+                  spanClass(cell.span),
+                  variantClass(actionByKey[cell.key].variant),
+                  { 'is-disabled': isActionDisabled(cell.key) },
+                ]"
+                :disabled="isLoading || isActionDisabled(cell.key)"
+                @click="runAction(cell.key)"
               >
-                {{ buttonLabel(action) }}
+                {{ buttonLabel(cell.key) }}
               </button>
             </div>
-          </article>
-        </div>
+          </div>
+        </article>
+
+        <article v-if="activeExtras.length > 0" class="extra-panel">
+          <h2>更多功能</h2>
+          <div class="extra-grid">
+            <button
+              v-for="key in activeExtras"
+              :key="key"
+              type="button"
+              class="action-btn action-btn--compact"
+              :class="[variantClass(actionByKey[key].variant), { 'is-disabled': isActionDisabled(key) }]"
+              :disabled="isLoading || isActionDisabled(key)"
+              @click="runAction(key)"
+            >
+              {{ buttonLabel(key) }}
+            </button>
+          </div>
+        </article>
       </section>
 
-      <section class="panel status-panel">
-        <p class="status-title">最近操作</p>
-        <p class="message">{{ displayMessage }}</p>
+      <section class="status-panel">
+        <p class="status-label">最近操作</p>
+        <p class="status-message">{{ displayMessage }}</p>
       </section>
-    </div>
+
+      <nav class="bottom-nav" aria-label="页面导航">
+        <button
+          v-for="item in navItems"
+          :key="item.id"
+          type="button"
+          class="nav-btn"
+          :class="{ active: activePage === item.id }"
+          @click="activePage = item.id"
+        >
+          <span class="nav-btn-bg">
+            <img :src="item.icon" :alt="item.label" class="nav-icon" />
+          </span>
+        </button>
+      </nav>
+    </section>
   </main>
 </template>
 
@@ -68,34 +73,74 @@
 import { computed, ref } from "vue";
 import type { OpenAppCommandResult } from "./plugins/miuiPower";
 import { MiuiPower } from "./plugins/miuiPower";
+import page1Icon from "./assets/nav-page-1.svg";
+import page2Icon from "./assets/nav-page-2.svg";
+import page3Icon from "./assets/nav-page-3.svg";
 
-interface ActionButton {
+type PageId = "page1" | "page2" | "page3";
+type ActionVariant = "pink" | "beige";
+type CellSpan = "half" | "full";
+
+interface ActionItem {
   key: string;
   label: string;
   loadingLabel: string;
-  run: () => Promise<void>;
+  variant: ActionVariant;
+  run?: () => Promise<void>;
+  disabled?: boolean;
 }
 
-interface ActionGroup {
-  title: string;
-  actions: ActionButton[];
+interface LayoutCell {
+  key: string;
+  span: CellSpan;
 }
 
-const theme = ref<"day" | "night">("day");
+interface NavItem {
+  id: PageId;
+  label: string;
+  icon: string;
+}
+
+const activePage = ref<PageId>("page1");
 const loadingAction = ref("");
 const message = ref("");
 
 const isLoading = computed(() => loadingAction.value !== "");
-const displayMessage = computed(() => {
-  return message.value || "等待操作，请点击一个入口按钮。";
-});
+const displayMessage = computed(() => message.value || "等待操作，请点击一个入口按钮。");
 
-function toggleTheme() {
-  theme.value = theme.value === "day" ? "night" : "day";
+function spanClass(span: CellSpan) {
+  return span === "full" ? "span-full" : "span-half";
 }
 
-function buttonLabel(action: ActionButton) {
-  return loadingAction.value === action.key ? action.loadingLabel : action.label;
+function variantClass(variant: ActionVariant) {
+  return variant === "beige" ? "tone-beige" : "tone-pink";
+}
+
+function buttonLabel(key: string) {
+  const action = actionByKey[key];
+  if (!action) {
+    return key;
+  }
+  return loadingAction.value === key ? action.loadingLabel : action.label;
+}
+
+function isActionDisabled(key: string) {
+  const action = actionByKey[key];
+  return !action || action.disabled === true || !action.run;
+}
+
+async function runAction(key: string) {
+  const action = actionByKey[key];
+  if (!action || action.disabled || !action.run || isLoading.value) {
+    return;
+  }
+  await action.run();
+}
+
+function getErrorMessage(error: unknown) {
+  return typeof error === "object" && error !== null && "message" in error
+    ? String((error as { message?: string }).message ?? "")
+    : "";
 }
 
 async function runWithLoading(key: string, fallbackMessage: string, task: () => Promise<string>) {
@@ -138,36 +183,28 @@ async function runSimpleOpenCommand(
 async function openBootShutdownPage() {
   await runWithLoading("bootShutdown", "无法打开定时开关机页面", async () => {
     const result = await MiuiPower.openBootShutdownPage();
-    return result.ok
-      ? `定时开关机：已尝试打开（${result.method}）`
-      : "定时开关机：打开失败";
+    return result.ok ? `定时开关机：已尝试打开（${result.method}）` : "定时开关机：打开失败";
   });
 }
 
 async function openWirelessDebuggingPage() {
   await runWithLoading("wirelessDebugging", "无法打开无线调试页面", async () => {
     const result = await MiuiPower.openWirelessDebuggingPage();
-    return result.ok
-      ? `无线调试：已尝试打开（${result.method}）`
-      : "无线调试：打开失败";
+    return result.ok ? `无线调试：已尝试打开（${result.method}）` : "无线调试：打开失败";
   });
 }
 
 async function openDeveloperOptionsPage() {
   await runWithLoading("developerOptions", "无法打开开发者选项", async () => {
     const result = await MiuiPower.openDeveloperOptions();
-    return result.ok
-      ? `开发者选项：已尝试打开（${result.method}）`
-      : "开发者选项：打开失败";
+    return result.ok ? `开发者选项：已尝试打开（${result.method}）` : "开发者选项：打开失败";
   });
 }
 
 async function openScreenRefreshRatePage() {
   await runWithLoading("screenRefreshRate", "无法打开屏幕刷新率设置", async () => {
     const result = await MiuiPower.openScreenRefreshRatePage();
-    return result.ok
-      ? `屏幕刷新率：已尝试打开（${result.method}）`
-      : "屏幕刷新率：打开失败";
+    return result.ok ? `屏幕刷新率：已尝试打开（${result.method}）` : "屏幕刷新率：打开失败";
   });
 }
 
@@ -227,335 +264,447 @@ async function getWindowFocusInfo() {
   });
 }
 
-function getErrorMessage(error: unknown) {
-  return typeof error === "object" && error !== null && "message" in error
-    ? String((error as { message?: string }).message ?? "")
-    : "";
-}
-
-const coreActions: ActionButton[] = [
-  {
+const actionByKey: Record<string, ActionItem> = {
+  bootShutdown: {
     key: "bootShutdown",
-    label: "打开定时开关机",
+    label: "定时开关机",
     loadingLabel: "正在打开...",
+    variant: "pink",
     run: openBootShutdownPage,
   },
-  {
-    key: "wirelessDebugging",
-    label: "打开无线调试",
-    loadingLabel: "正在打开...",
-    run: openWirelessDebuggingPage,
-  },
-  {
+  developerOptions: {
     key: "developerOptions",
-    label: "打开开发者选项",
+    label: "开发者选项",
     loadingLabel: "正在打开...",
+    variant: "pink",
     run: openDeveloperOptionsPage,
   },
-  {
-    key: "screenRefreshRate",
-    label: "打开屏幕刷新率",
-    loadingLabel: "正在打开...",
-    run: openScreenRefreshRatePage,
-  },
-  {
-    key: "honorOfKings",
-    label: "启动王者荣耀",
-    loadingLabel: "正在启动...",
-    run: openHonorOfKings,
-  },
-  {
-    key: "focusOverlay",
-    label: "启动焦点悬浮按钮",
-    loadingLabel: "正在启动...",
-    run: startFocusOverlay,
-  },
-  {
+  accessibility: {
     key: "accessibility",
-    label: "打开无障碍设置",
+    label: "无障碍设置",
     loadingLabel: "正在打开...",
+    variant: "pink",
     run: openAccessibilitySettings,
   },
-  {
+  screenRefreshRate: {
+    key: "screenRefreshRate",
+    label: "分辨率调整",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: openScreenRefreshRatePage,
+  },
+  wirelessDebugging: {
+    key: "wirelessDebugging",
+    label: "无线调试",
+    loadingLabel: "正在打开...",
+    variant: "beige",
+    run: openWirelessDebuggingPage,
+  },
+  focusOverlay: {
+    key: "focusOverlay",
+    label: "启动焦点",
+    loadingLabel: "正在启动...",
+    variant: "pink",
+    run: startFocusOverlay,
+  },
+  stopFocusOverlay: {
+    key: "stopFocusOverlay",
+    label: "关闭焦点",
+    loadingLabel: "正在关闭...",
+    variant: "pink",
+    run: stopFocusOverlay,
+  },
+  windowFocus: {
     key: "windowFocus",
     label: "读取窗口焦点",
     loadingLabel: "正在读取...",
+    variant: "pink",
     run: getWindowFocusInfo,
   },
-  {
-    key: "stopFocusOverlay",
-    label: "关闭焦点悬浮按钮",
-    loadingLabel: "正在关闭...",
-    run: stopFocusOverlay,
+  screenTimePage: {
+    key: "screenTimePage",
+    label: "屏幕时间",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("screenTimePage", "屏幕时间页面", () => MiuiPower.openScreenTimePage()),
   },
+  usageAccessSettings: {
+    key: "usageAccessSettings",
+    label: "使用情况权限",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("usageAccessSettings", "使用情况访问权限", () =>
+        MiuiPower.openUsageAccessSettings(),
+      ),
+  },
+  honorOfKings: {
+    key: "honorOfKings",
+    label: "王者荣耀",
+    loadingLabel: "正在启动...",
+    variant: "pink",
+    run: openHonorOfKings,
+  },
+  openBilibili: {
+    key: "openBilibili",
+    label: "哔哩哔哩",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openBilibili", "打开 Bilibili", () => MiuiPower.openBilibili()),
+  },
+  openWeChat: {
+    key: "openWeChat",
+    label: "微信",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openWeChat", "打开微信", () => MiuiPower.openWeChat()),
+  },
+  qqPlaceholder: {
+    key: "qqPlaceholder",
+    label: "QQ（待接入）",
+    loadingLabel: "待接入",
+    variant: "pink",
+    disabled: true,
+  },
+  openQQMusic: {
+    key: "openQQMusic",
+    label: "QQ音乐",
+    loadingLabel: "正在打开...",
+    variant: "beige",
+    run: () => runSimpleOpenCommand("openQQMusic", "打开 QQ 音乐", () => MiuiPower.openQQMusic()),
+  },
+  openCamera: {
+    key: "openCamera",
+    label: "相机",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openCamera", "打开相机", () => MiuiPower.openCamera()),
+  },
+  openGallery: {
+    key: "openGallery",
+    label: "相册",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openGallery", "打开相册", () => MiuiPower.openGallery()),
+  },
+  morePlaceholderLeft: {
+    key: "morePlaceholderLeft",
+    label: "...",
+    loadingLabel: "...",
+    variant: "pink",
+    disabled: true,
+  },
+  morePlaceholderRight: {
+    key: "morePlaceholderRight",
+    label: "...",
+    loadingLabel: "...",
+    variant: "pink",
+    disabled: true,
+  },
+  openFileManager: {
+    key: "openFileManager",
+    label: "文件管理",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openFileManager", "文件管理", () => MiuiPower.openFileManager()),
+  },
+  pickFile: {
+    key: "pickFile",
+    label: "选择文件",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("pickFile", "选择文件", () => MiuiPower.pickFile()),
+  },
+  pickFolder: {
+    key: "pickFolder",
+    label: "选择目录",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("pickFolder", "选择目录", () => MiuiPower.pickFolder()),
+  },
+  openChrome: {
+    key: "openChrome",
+    label: "打开 Chrome",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openChrome", "打开 Chrome", () => MiuiPower.openChrome()),
+  },
+  openUrl: {
+    key: "openUrl",
+    label: "URL 示例",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("openUrl", "Chrome 打开 URL", () =>
+        MiuiPower.openUrl({ url: "https://www.google.com", packageName: "com.android.chrome" }),
+      ),
+  },
+  openChromeIncognito: {
+    key: "openChromeIncognito",
+    label: "Chrome 无痕",
+    loadingLabel: "正在尝试...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("openChromeIncognito", "Chrome 无痕", () =>
+        MiuiPower.openChromeIncognitoBestEffort(),
+      ),
+  },
+  openAmap: {
+    key: "openAmap",
+    label: "高德地图",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openAmap", "打开高德地图", () => MiuiPower.openAmap()),
+  },
+  openMapLocation: {
+    key: "openMapLocation",
+    label: "高德定位",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("openMapLocation", "高德定位", () =>
+        MiuiPower.openMapLocation({ lat: 31.2304, lng: 121.4737, name: "上海市人民广场" }),
+      ),
+  },
+  openNavigation: {
+    key: "openNavigation",
+    label: "高德导航",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("openNavigation", "高德导航", () =>
+        MiuiPower.openNavigation({ lat: 31.2304, lng: 121.4737, name: "上海市人民广场" }),
+      ),
+  },
+  openMapSearch: {
+    key: "openMapSearch",
+    label: "高德搜索",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("openMapSearch", "高德搜索", () =>
+        MiuiPower.openMapSearch({ keyword: "外滩" }),
+      ),
+  },
+  openKeep: {
+    key: "openKeep",
+    label: "Keep",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openKeep", "打开 Keep", () => MiuiPower.openKeep()),
+  },
+  openMusicLink: {
+    key: "openMusicLink",
+    label: "音乐链接",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("openMusicLink", "打开音乐链接", () =>
+        MiuiPower.openMusicLink({ url: "https://y.qq.com" }),
+      ),
+  },
+  shareText: {
+    key: "shareText",
+    label: "分享文本",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("shareText", "系统分享文本", () =>
+        MiuiPower.shareText({ text: "这是一条来自 MIUI Intent Launcher 的分享文本" }),
+      ),
+  },
+  shareUrl: {
+    key: "shareUrl",
+    label: "分享链接",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("shareUrl", "系统分享链接", () =>
+        MiuiPower.shareUrl({ url: "https://www.bilibili.com" }),
+      ),
+  },
+  openClash: {
+    key: "openClash",
+    label: "Clash",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openClash", "打开 Clash", () => MiuiPower.openClash()),
+  },
+  openDoubao: {
+    key: "openDoubao",
+    label: "豆包",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openDoubao", "打开豆包", () => MiuiPower.openDoubao()),
+  },
+  shareToDoubao: {
+    key: "shareToDoubao",
+    label: "分享到豆包",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("shareToDoubao", "分享文本到豆包", () =>
+        MiuiPower.shareToDoubao({ text: "请帮我总结今天的工作要点。" }),
+      ),
+  },
+  openBiliUrl: {
+    key: "openBiliUrl",
+    label: "B站链接",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("openBiliUrl", "打开 B 站链接", () =>
+        MiuiPower.openBiliUrl({ url: "https://www.bilibili.com/video/BV1GJ411x7h7" }),
+      ),
+  },
+  openWeather: {
+    key: "openWeather",
+    label: "天气",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openWeather", "打开天气", () => MiuiPower.openWeather()),
+  },
+  openRecorder: {
+    key: "openRecorder",
+    label: "录音机",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("openRecorder", "打开录音机", () => MiuiPower.openRecorder()),
+  },
+  recordSound: {
+    key: "recordSound",
+    label: "系统录音",
+    loadingLabel: "正在打开...",
+    variant: "beige",
+    run: () => runSimpleOpenCommand("recordSound", "系统录音", () => MiuiPower.recordSound()),
+  },
+  openAuthenticator: {
+    key: "openAuthenticator",
+    label: "Authenticator",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () =>
+      runSimpleOpenCommand("openAuthenticator", "打开 Authenticator", () =>
+        MiuiPower.openAuthenticator(),
+      ),
+  },
+  takePhoto: {
+    key: "takePhoto",
+    label: "拍照",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("takePhoto", "拍照", () => MiuiPower.takePhoto()),
+  },
+  takeVideo: {
+    key: "takeVideo",
+    label: "录像",
+    loadingLabel: "正在打开...",
+    variant: "pink",
+    run: () => runSimpleOpenCommand("takeVideo", "录像", () => MiuiPower.takeVideo()),
+  },
+  pickImage: {
+    key: "pickImage",
+    label: "选择图片",
+    loadingLabel: "正在打开...",
+    variant: "beige",
+    run: () => runSimpleOpenCommand("pickImage", "选择图片", () => MiuiPower.pickImage()),
+  },
+  pickVideo: {
+    key: "pickVideo",
+    label: "选择视频",
+    loadingLabel: "正在打开...",
+    variant: "beige",
+    run: () => runSimpleOpenCommand("pickVideo", "选择视频", () => MiuiPower.pickVideo()),
+  },
+};
+
+const pageLayouts: Record<PageId, LayoutCell[][]> = {
+  page1: [
+    [
+      { key: "bootShutdown", span: "half" },
+      { key: "developerOptions", span: "half" },
+    ],
+    [
+      { key: "accessibility", span: "half" },
+      { key: "screenRefreshRate", span: "half" },
+    ],
+    [{ key: "wirelessDebugging", span: "full" }],
+    [
+      { key: "focusOverlay", span: "half" },
+      { key: "stopFocusOverlay", span: "half" },
+    ],
+  ],
+  page2: [
+    [
+      { key: "honorOfKings", span: "half" },
+      { key: "openBilibili", span: "half" },
+    ],
+    [
+      { key: "openWeChat", span: "half" },
+      { key: "qqPlaceholder", span: "half" },
+    ],
+    [{ key: "openQQMusic", span: "full" }],
+    [
+      { key: "openCamera", span: "half" },
+      { key: "openGallery", span: "half" },
+    ],
+    [
+      { key: "morePlaceholderLeft", span: "half" },
+      { key: "morePlaceholderRight", span: "half" },
+    ],
+  ],
+  page3: [
+    [
+      { key: "openWeather", span: "half" },
+      { key: "openRecorder", span: "half" },
+    ],
+    [
+      { key: "recordSound", span: "half" },
+      { key: "openAuthenticator", span: "half" },
+    ],
+    [
+      { key: "takePhoto", span: "half" },
+      { key: "takeVideo", span: "half" },
+    ],
+    [
+      { key: "pickImage", span: "half" },
+      { key: "pickVideo", span: "half" },
+    ],
+  ],
+};
+
+const pageExtras: Record<PageId, string[]> = {
+  page1: ["windowFocus", "screenTimePage", "usageAccessSettings"],
+  page2: [
+    "openFileManager",
+    "pickFile",
+    "pickFolder",
+    "openChrome",
+    "openUrl",
+    "openChromeIncognito",
+    "openAmap",
+    "openMapLocation",
+    "openNavigation",
+    "openMapSearch",
+    "openKeep",
+    "openMusicLink",
+    "shareText",
+    "shareUrl",
+    "openClash",
+    "openDoubao",
+    "shareToDoubao",
+    "openBiliUrl",
+  ],
+  page3: [],
+};
+
+const navItems: NavItem[] = [
+  { id: "page1", label: "页面一", icon: page1Icon },
+  { id: "page2", label: "页面二", icon: page2Icon },
+  { id: "page3", label: "页面三", icon: page3Icon },
 ];
 
-const entryGroups: ActionGroup[] = [
-  {
-    title: "屏幕时间与文件",
-    actions: [
-      {
-        key: "screenTimePage",
-        label: "打开屏幕时间页面",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("screenTimePage", "屏幕时间页面", () => MiuiPower.openScreenTimePage()),
-      },
-      {
-        key: "usageAccessSettings",
-        label: "打开使用情况访问权限",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("usageAccessSettings", "使用情况访问权限", () =>
-            MiuiPower.openUsageAccessSettings(),
-          ),
-      },
-      {
-        key: "fileManager",
-        label: "打开文件管理",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("fileManager", "文件管理", () => MiuiPower.openFileManager()),
-      },
-      {
-        key: "pickFile",
-        label: "选择文件",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("pickFile", "选择文件", () => MiuiPower.pickFile()),
-      },
-      {
-        key: "pickFolder",
-        label: "选择目录",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("pickFolder", "选择目录", () => MiuiPower.pickFolder()),
-      },
-    ],
-  },
-  {
-    title: "Chrome 与地图",
-    actions: [
-      {
-        key: "openChrome",
-        label: "打开 Chrome",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openChrome", "打开 Chrome", () => MiuiPower.openChrome()),
-      },
-      {
-        key: "openUrl",
-        label: "Chrome 打开 URL 示例",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("openUrl", "Chrome 打开 URL", () =>
-            MiuiPower.openUrl({
-              url: "https://www.google.com",
-              packageName: "com.android.chrome",
-            }),
-          ),
-      },
-      {
-        key: "openChromeIncognito",
-        label: "尝试打开 Chrome 无痕",
-        loadingLabel: "正在尝试...",
-        run: () =>
-          runSimpleOpenCommand("openChromeIncognito", "Chrome 无痕", () =>
-            MiuiPower.openChromeIncognitoBestEffort(),
-          ),
-      },
-      {
-        key: "openAmap",
-        label: "打开高德地图",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openAmap", "打开高德地图", () => MiuiPower.openAmap()),
-      },
-      {
-        key: "openMapLocation",
-        label: "高德定位示例",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("openMapLocation", "高德定位", () =>
-            MiuiPower.openMapLocation({
-              lat: 31.2304,
-              lng: 121.4737,
-              name: "上海市人民广场",
-            }),
-          ),
-      },
-      {
-        key: "openNavigation",
-        label: "高德导航示例",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("openNavigation", "高德导航", () =>
-            MiuiPower.openNavigation({
-              lat: 31.2304,
-              lng: 121.4737,
-              name: "上海市人民广场",
-            }),
-          ),
-      },
-      {
-        key: "openMapSearch",
-        label: "高德搜索示例",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("openMapSearch", "高德搜索", () =>
-            MiuiPower.openMapSearch({ keyword: "外滩" }),
-          ),
-      },
-    ],
-  },
-  {
-    title: "社交、音乐与内容",
-    actions: [
-      {
-        key: "openKeep",
-        label: "打开 Keep",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openKeep", "打开 Keep", () => MiuiPower.openKeep()),
-      },
-      {
-        key: "openQQMusic",
-        label: "打开 QQ 音乐",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openQQMusic", "打开 QQ 音乐", () => MiuiPower.openQQMusic()),
-      },
-      {
-        key: "openMusicLink",
-        label: "打开音乐链接示例",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("openMusicLink", "打开音乐链接", () =>
-            MiuiPower.openMusicLink({ url: "https://y.qq.com" }),
-          ),
-      },
-      {
-        key: "openWeChat",
-        label: "打开微信",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openWeChat", "打开微信", () => MiuiPower.openWeChat()),
-      },
-      {
-        key: "shareText",
-        label: "系统分享文本",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("shareText", "系统分享文本", () =>
-            MiuiPower.shareText({ text: "这是一条来自 MIUI Intent Launcher 的分享文本" }),
-          ),
-      },
-      {
-        key: "shareUrl",
-        label: "系统分享链接",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("shareUrl", "系统分享链接", () =>
-            MiuiPower.shareUrl({ url: "https://www.bilibili.com" }),
-          ),
-      },
-      {
-        key: "openBilibili",
-        label: "打开 Bilibili",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openBilibili", "打开 Bilibili", () => MiuiPower.openBilibili()),
-      },
-      {
-        key: "openBiliUrl",
-        label: "打开 B 站链接示例",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("openBiliUrl", "打开 B 站链接", () =>
-            MiuiPower.openBiliUrl({ url: "https://www.bilibili.com/video/BV1GJ411x7h7" }),
-          ),
-      },
-    ],
-  },
-  {
-    title: "工具与系统应用",
-    actions: [
-      {
-        key: "openClash",
-        label: "打开 Clash",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openClash", "打开 Clash", () => MiuiPower.openClash()),
-      },
-      {
-        key: "openGallery",
-        label: "打开相册",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openGallery", "打开相册", () => MiuiPower.openGallery()),
-      },
-      {
-        key: "pickImage",
-        label: "选择图片",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("pickImage", "选择图片", () => MiuiPower.pickImage()),
-      },
-      {
-        key: "pickVideo",
-        label: "选择视频",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("pickVideo", "选择视频", () => MiuiPower.pickVideo()),
-      },
-      {
-        key: "openAuthenticator",
-        label: "打开 Authenticator",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("openAuthenticator", "打开 Authenticator", () =>
-            MiuiPower.openAuthenticator(),
-          ),
-      },
-      {
-        key: "openRecorder",
-        label: "打开录音机",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openRecorder", "打开录音机", () => MiuiPower.openRecorder()),
-      },
-      {
-        key: "recordSound",
-        label: "系统录音",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("recordSound", "系统录音", () => MiuiPower.recordSound()),
-      },
-      {
-        key: "openWeather",
-        label: "打开天气",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openWeather", "打开天气", () => MiuiPower.openWeather()),
-      },
-      {
-        key: "openCamera",
-        label: "打开相机",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openCamera", "打开相机", () => MiuiPower.openCamera()),
-      },
-      {
-        key: "takePhoto",
-        label: "拍照",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("takePhoto", "拍照", () => MiuiPower.takePhoto()),
-      },
-      {
-        key: "takeVideo",
-        label: "录像",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("takeVideo", "录像", () => MiuiPower.takeVideo()),
-      },
-      {
-        key: "openDoubao",
-        label: "打开豆包",
-        loadingLabel: "正在打开...",
-        run: () => runSimpleOpenCommand("openDoubao", "打开豆包", () => MiuiPower.openDoubao()),
-      },
-      {
-        key: "shareToDoubao",
-        label: "分享文本到豆包（尝试）",
-        loadingLabel: "正在打开...",
-        run: () =>
-          runSimpleOpenCommand("shareToDoubao", "分享文本到豆包", () =>
-            MiuiPower.shareToDoubao({ text: "请帮我总结今天的工作要点。" }),
-          ),
-      },
-    ],
-  },
-];
+const activeRows = computed(() => pageLayouts[activePage.value]);
+const activeExtras = computed(() => pageExtras[activePage.value]);
 </script>
