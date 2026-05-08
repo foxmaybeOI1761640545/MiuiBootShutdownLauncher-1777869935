@@ -104,10 +104,11 @@ if ($LASTEXITCODE -ne 0) {
     throw "git commit failed."
 }
 
-$actual = git log -1 --pretty=%B
+$actualLines = git log -1 --pretty=%B
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to read latest commit message."
 }
+$actual = ($actualLines -join "`n")
 
 $expectedNormalized = $messageContent.Replace("`r`n", "`n").TrimEnd()
 $actualNormalized = $actual.Replace("`r`n", "`n").TrimEnd()
