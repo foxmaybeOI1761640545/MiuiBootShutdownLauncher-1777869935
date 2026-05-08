@@ -1,4 +1,4 @@
 interface:
-  display_name: "Version Release"
+  display_name: "提交到本地+推送+发布版本 - Commit+Push+Release"
   short_description: "Automate commit, push, tagging, and release workflows"
   default_prompt: "Use $version-release to commit pending changes, push, and publish the next version tag."

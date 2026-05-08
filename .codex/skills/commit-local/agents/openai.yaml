@@ -1,0 +1,4 @@
+interface:
+  display_name: "提交到本地 - Commit Local"
+  short_description: "Commit locally with template and Chinese encoding checks"
+  default_prompt: "Use $commit-local to create a local commit with the repository template and verify Chinese commit message encoding."
