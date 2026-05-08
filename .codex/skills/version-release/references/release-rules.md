@@ -1,5 +1,30 @@
 # Release Rules
 
+## Local PAT Storage Rule
+
+- Keep real credentials in `.git/version-release-auth.env` only.
+- Use `local-auth.example.env` as a template reference.
+- Do not commit any file containing real PAT.
+
+Example local file content:
+
+```text
+GITHUB_USER=your-user
+GITHUB_EMAIL=your-email@example.com
+GITHUB_PAT=github_pat_xxxxxxxxxxxxxxxxxxxxxxxxx
+GITHUB_REMOTE=origin
+```
+
+## Local Auth Initialization
+
+Run once in a repository clone:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .codex/skills/version-release/scripts/setup-local-auth.ps1
+```
+
+This command updates local `.git/config` only and never writes PAT to tracked files.
+
 ## Commit Template
 
 Use the repository `.gitmessage` structure exactly:
@@ -29,11 +54,16 @@ Use the repository `.gitmessage` structure exactly:
 - `y`: previous highest `y` + 1
 - Use `scripts/next-release-tag.ps1` to calculate the next tag
 
-## Push Strategy
+## Remote Command Rule
 
-1. Push commit(s) to branch first.
-2. Create and verify annotated tag.
-3. Push tag to remote.
+Use the auth wrapper for every remote operation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .codex/skills/version-release/scripts/git-auth.ps1 fetch origin
+powershell -ExecutionPolicy Bypass -File .codex/skills/version-release/scripts/git-auth.ps1 pull --ff-only origin main
+powershell -ExecutionPolicy Bypass -File .codex/skills/version-release/scripts/git-auth.ps1 push origin main
+powershell -ExecutionPolicy Bypass -File .codex/skills/version-release/scripts/git-auth.ps1 push origin <tag>
+```
 
 ## Encoding Check
 

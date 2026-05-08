@@ -1,13 +1,19 @@
 ---
 name: version-release
-description: Publish Git releases for this repository with a repeatable workflow for writing template-compliant commit messages, validating Chinese commit text rendering, pushing with token-based authentication, and creating the next version tag in the format vx.0.y. Use when the user asks to commit pending changes, push to GitHub, or publish a new release tag.
+description: Publish Git releases for this repository with a repeatable workflow for writing template-compliant commit messages, validating Chinese commit text rendering, using local-only PAT credentials for remote operations, and creating the next version tag in the format vx.0.y. Use when the user asks to commit pending changes, push to GitHub, or publish a new release tag.
 ---
 
 # Version Release
 
 ## Overview
 
-Use this skill to standardize commit, push, and tagging operations for this project without leaking credentials.
+Use this skill to standardize commit, push, and tagging operations for this project without leaking credentials to tracked files.
+
+## One-Time Local Auth Setup
+
+1. Create local-only auth file at `.git/version-release-auth.env`.
+2. Use the template in `references/local-auth.example.env`.
+3. Run `scripts/setup-local-auth.ps1` once per repository clone.
 
 ## Workflow
 
@@ -15,16 +21,18 @@ Use this skill to standardize commit, push, and tagging operations for this proj
 2. Check repository state with `git status --short --branch`.
 3. Build a commit message that strictly follows `.gitmessage`.
 4. Stage and commit intended files.
-5. Verify Chinese commit text by reading `git log -1 --pretty=%B` in UTF-8 output.
+5. Verify Chinese commit text by running `git log -1 --pretty=%B` with UTF-8 output.
 6. Compute the next tag with `scripts/next-release-tag.ps1`.
-7. Push branch commits first, then push the annotated tag.
+7. Execute remote operations through `scripts/git-auth.ps1`:
+   - Branch push: `scripts/git-auth.ps1 push origin main`
+   - Tag push: `scripts/git-auth.ps1 push origin <tag>`
 
 ## Commit Message Rules
 
-- Keep the subject format: `<type>(<scope>): <中文摘要> | <English summary>`.
+- Keep subject format: `<type>(<scope>): <Chinese summary> | <English summary>`.
 - Fill all structured fields from `.gitmessage`.
 - Write unavailable sections as `N/A`.
-- Avoid placeholder text or missing sections.
+- Avoid placeholders or missing sections.
 
 ## Version Tag Rules
 
@@ -35,6 +43,7 @@ Use this skill to standardize commit, push, and tagging operations for this proj
 
 ## Security Rules
 
-- Pass PAT through temporary environment variables or ephemeral git config.
-- Never commit PAT, usernames, or email credentials into tracked files.
+- Keep PAT in `.git/version-release-auth.env` only.
+- Never store PAT in tracked files, commit messages, tag messages, or script defaults.
+- Use `scripts/git-auth.ps1` for remote operations to inject PAT only at runtime.
 - Avoid printing full credential-bearing URLs in terminal output.
