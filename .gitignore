@@ -48,6 +48,7 @@ android/app/release-keystore.jks
 
 # Local temporary folders
 _tmp_vite_app/
+temp/
 
 # Local release skill secrets
 .codex/skills/version-release/**/*.local.env
