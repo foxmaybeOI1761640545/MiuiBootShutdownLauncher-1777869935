@@ -47,6 +47,18 @@ Use the repository `.gitmessage` structure exactly:
 - Docs: <content> or N/A
 ```
 
+## Local Commit Execution Rule
+
+- Save commit message in UTF-8 (without BOM preferred).
+- Run the wrapper script to ensure strict template validation and encoding check:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .codex/skills/version-release/scripts/commit-local-with-check.ps1 -MessageFile .git/COMMIT_MSG.txt
+```
+
+- The script fails if required template sections are missing.
+- The script fails if the message stored in the commit does not match the source message text.
+
 ## Release Tag Rule
 
 - Required format: `vx.0.y`

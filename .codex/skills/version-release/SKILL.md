@@ -20,8 +20,8 @@ Use this skill to standardize commit, push, and tagging operations for this proj
 1. Read `references/release-rules.md`.
 2. Check repository state with `git status --short --branch`.
 3. Build a commit message that strictly follows `.gitmessage`.
-4. Stage and commit intended files.
-5. Verify Chinese commit text by running `git log -1 --pretty=%B` with UTF-8 output.
+4. Save commit message into a UTF-8 message file.
+5. Run `scripts/commit-local-with-check.ps1 -MessageFile <path>` to stage, commit, and verify message encoding.
 6. Compute the next tag with `scripts/next-release-tag.ps1`.
 7. Execute remote operations through `scripts/git-auth.ps1`:
    - Branch push: `scripts/git-auth.ps1 push origin main`
