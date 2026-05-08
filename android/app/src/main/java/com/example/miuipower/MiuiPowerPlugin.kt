@@ -30,6 +30,9 @@ class MiuiPowerPlugin : Plugin() {
         private const val ACTION_MIUI_SCREEN_REFRESH_RATE = "miui.intent.action.DISPLAY_REFRESH_RATE"
         private const val ACTION_DISPLAY_SETTINGS = Settings.ACTION_DISPLAY_SETTINGS
         private const val PKG_SETTINGS = "com.android.settings"
+        private const val PKG_MISETTINGS = "com.xiaomi.misettings"
+        private const val ACTIVITY_MISETTINGS_REFRESH_RATE =
+            "com.xiaomi.misettings.display.RefreshRate.RefreshRateActivity"
         private const val ACTIVITY_SUB_SETTINGS = "com.android.settings.SubSettings"
         private const val PKG_HONOR_OF_KINGS = "com.tencent.tmgp.sgame"
         private const val EXTRA_SHOW_FRAGMENT = ":settings:show_fragment"
@@ -103,6 +106,11 @@ class MiuiPowerPlugin : Plugin() {
     @PluginMethod
     fun openScreenRefreshRatePage(call: PluginCall) {
         val ctx = context
+
+        if (tryOpenScreenRefreshRateByMiSettingsActivity(ctx)) {
+            call.resolve(result(true, "xiaomi_misettings_refresh_rate_activity"))
+            return
+        }
 
         if (tryOpenScreenRefreshRateByAction(ctx)) {
             call.resolve(result(true, "miui_refresh_rate_action"))
@@ -380,6 +388,20 @@ class MiuiPowerPlugin : Plugin() {
             true
         } catch (e: Exception) {
             Log.w(TAG, "MIUI refresh-rate action launch failed", e)
+            false
+        }
+    }
+
+    private fun tryOpenScreenRefreshRateByMiSettingsActivity(context: Context): Boolean {
+        return try {
+            val intent = Intent().apply {
+                component = ComponentName(PKG_MISETTINGS, ACTIVITY_MISETTINGS_REFRESH_RATE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "MiSettings refresh-rate activity launch failed", e)
             false
         }
     }

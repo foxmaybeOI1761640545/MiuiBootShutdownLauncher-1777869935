@@ -17,7 +17,12 @@ export interface OpenDeveloperOptionsResult {
 
 export interface OpenScreenRefreshRateResult {
   ok: boolean;
-  method: "miui_refresh_rate_action" | "refresh_rate_fragment" | "display_settings" | "none";
+  method:
+    | "xiaomi_misettings_refresh_rate_activity"
+    | "miui_refresh_rate_action"
+    | "refresh_rate_fragment"
+    | "display_settings"
+    | "none";
 }
 
 export interface OpenHonorOfKingsResult {
