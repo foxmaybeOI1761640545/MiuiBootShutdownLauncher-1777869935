@@ -1,47 +1,19 @@
 <template>
   <main class="page">
     <section class="launcher-shell">
-      <header class="app-header">
-        <h1>Launcher</h1>
-      </header>
+      <section class="zone1-fixed">
+        <header class="app-header">
+          <h1>Launcher</h1>
+        </header>
 
-      <section v-if="activePage !== 'settings'" ref="runtimeStageRef" class="action-stage">
-        <article class="primary-panel" data-locate="zone1-fixed">
-          <div class="action-rows">
-            <div
-              v-for="(row, rowIndex) in activeFixedRows"
-              :key="`${activePage}-${rowIndex}`"
-              class="action-row"
-            >
-              <button
-                v-for="cell in row"
-                :key="cell.key"
-                type="button"
-                class="action-btn"
-                :class="[
-                  spanClass(cell.span),
-                  variantClass(actionByKey[cell.key].variant),
-                  highlightClass(`action-${activePage}-${cell.key}`),
-                  { 'is-disabled': isActionDisabled(cell.key) },
-                ]"
-                :data-locate="`action-${activePage}-${cell.key}`"
-                :disabled="isLoading || isActionDisabled(cell.key)"
-                @click="runBuiltinAction(cell.key)"
-              >
-                {{ buttonLabel(cell.key) }}
-              </button>
-            </div>
-          </div>
-        </article>
-
-        <article class="search-panel" data-locate="search-global">
-          <label class="search-label" for="global-search">全局搜索（按钮 + 设置项）</label>
+        <article class="search-panel search-panel--fixed" data-locate="search-global-fixed">
+          <label class="search-label" for="global-search-fixed">Global Search</label>
           <input
-            id="global-search"
+            id="global-search-fixed"
             v-model.trim="searchKeyword"
             type="search"
             class="search-input"
-            placeholder="搜索按钮名称、分组、设置项"
+            placeholder="Search button/group/setting"
           />
           <ul v-if="searchKeyword && searchResults.length > 0" class="search-results">
             <li v-for="item in searchResults" :key="item.id">
@@ -51,315 +23,415 @@
               </button>
             </li>
           </ul>
-          <p v-else-if="searchKeyword" class="search-empty">没有找到匹配项。</p>
-        </article>
-
-        <article class="zone2-panel" data-locate="zone2-panel">
-          <h2>区域二</h2>
-          <div v-if="activeZone2Groups.length === 0" class="search-empty">当前没有可用分组。</div>
-          <section
-            v-for="group in activeZone2Groups"
-            :key="group.id"
-            class="zone2-group"
-            :data-locate="`group-${activePage}-${group.id}`"
-            :class="highlightClass(`group-${activePage}-${group.id}`)"
-          >
-            <button type="button" class="group-header" @click="toggleGroup(activePage, group.id)">
-              <span>{{ group.title }}</span>
-              <span>{{ isGroupCollapsed(activePage, group.id) ? "展开" : "收起" }}</span>
-            </button>
-            <div v-if="!isGroupCollapsed(activePage, group.id)" class="extra-grid">
-              <button
-                v-for="entry in zone2EntriesByGroup(activePage, group.id)"
-                :key="entry.id"
-                type="button"
-                class="action-btn action-btn--compact"
-                :class="[
-                  spanClass(entry.size === 'large' ? 'full' : 'half'),
-                  variantClass(entry.variant),
-                  highlightClass(entry.locateKey),
-                  { 'is-disabled': entry.disabled },
-                ]"
-                :data-locate="entry.locateKey"
-                :disabled="isLoading || entry.disabled"
-                @click="runZone2Entry(entry)"
-              >
-                {{ zone2EntryLabel(entry) }}
-              </button>
-            </div>
-          </section>
+          <p v-else-if="searchKeyword" class="search-empty">No matched item.</p>
         </article>
       </section>
 
-      <section v-else ref="settingsStageRef" class="settings-stage">
-        <article class="settings-panel" data-locate="settings-save">
-          <h2>设置中心</h2>
-          <p class="settings-help">仅区域二可编辑。编辑完成后点击保存应用；撤销会恢复到上次保存状态。</p>
-          <div class="settings-actions">
-            <button type="button" class="action-btn action-btn--compact tone-beige" :disabled="!isDraftDirty" @click="saveDraftConfig">
-              保存配置
-            </button>
-            <button type="button" class="action-btn action-btn--compact tone-pink" :disabled="!isDraftDirty" @click="revertDraftConfig">
-              撤销改动
-            </button>
-          </div>
-        </article>
-
-        <article class="settings-panel" data-locate="settings-actions">
-          <h2>区域二按钮分配</h2>
-          <div class="settings-grid">
-            <div v-for="row in draftPlacementRows" :key="row.id" class="settings-row">
-              <div class="settings-row-title">
-                <strong>{{ row.label }}</strong>
-                <small>{{ row.sourceLabel }}</small>
-              </div>
-              <label>
-                页面
-                <select :value="row.placement.pageId" @change="updateRowPage(row, $event)">
-                  <option value="page1">页面一</option>
-                  <option value="page2">页面二</option>
-                </select>
-              </label>
-              <label>
-                分组
-                <select :value="row.placement.groupId" @change="updateRowGroup(row, $event)">
-                  <option
-                    v-for="group in groupsForPage(row.placement.pageId)"
-                    :key="group.id"
-                    :value="group.id"
-                  >
-                    {{ group.title }}
-                  </option>
-                </select>
-              </label>
-              <label>
-                尺寸
-                <select :value="row.placement.size" @change="updateRowSize(row, $event)">
-                  <option value="small">小（半宽）</option>
-                  <option value="large">大（整行）</option>
-                </select>
-              </label>
-              <div class="settings-row-btns">
-                <button type="button" class="mini-btn" @click="moveRow(row, -1)">上移</button>
-                <button type="button" class="mini-btn" @click="moveRow(row, 1)">下移</button>
-              </div>
-            </div>
-          </div>
-        </article>
-
-        <article class="settings-panel" data-locate="settings-groups">
-          <h2>分组管理（区域二）</h2>
-          <div class="group-create">
-            <label>
-              页面
-              <select v-model="newGroupForm.pageId">
-                <option value="page1">页面一</option>
-                <option value="page2">页面二</option>
-              </select>
-            </label>
-            <label>
-              标题
-              <input v-model.trim="newGroupForm.title" type="text" placeholder="例如：系统工具" />
-            </label>
-            <label class="checkbox-label">
-              <input v-model="newGroupForm.collapsedByDefault" type="checkbox" />
-              默认折叠
-            </label>
-            <button type="button" class="mini-btn" @click="createGroup">新增分组</button>
-          </div>
-
-          <div class="settings-grid">
-            <div v-for="group in draftGroups" :key="group.id" class="settings-row">
-              <div class="settings-row-title">
-                <strong>{{ group.id }}</strong>
-                <small>{{ group.pageId === "page1" ? "页面一" : "页面二" }}</small>
-              </div>
-              <label>
-                标题
-                <input v-model.trim="group.title" type="text" />
-              </label>
-              <label class="checkbox-label">
-                <input v-model="group.collapsedByDefault" type="checkbox" />
-                默认折叠
-              </label>
-              <div class="settings-row-btns">
-                <button type="button" class="mini-btn" @click="moveGroup(group, -1)">上移</button>
-                <button type="button" class="mini-btn" @click="moveGroup(group, 1)">下移</button>
-                <button
-                  type="button"
-                  class="mini-btn mini-btn-danger"
-                  :disabled="groupHasRows(group)"
-                  @click="deleteGroup(group)"
-                >
-                  删除
-                </button>
-              </div>
-            </div>
-          </div>
-          <p class="settings-help">含按钮的分组不可删除，请先把按钮迁走。</p>
-        </article>
-
-        <article class="settings-panel" data-locate="settings-custom">
-          <h2>实验功能：自定义按钮</h2>
-          <p class="settings-help">支持“引用内置动作”或“自定义 Intent/包名/Activity/Action/URL”。</p>
-
-          <div class="custom-toolbar">
-            <button type="button" class="mini-btn" @click="startCreateCustom">新建自定义按钮</button>
-          </div>
-
-          <div v-if="draftCustomActions.length > 0" class="custom-list">
-            <div v-for="item in draftCustomActions" :key="item.id" class="custom-item">
-              <div>
-                <strong>{{ item.label }}</strong>
-                <small>{{ item.id }}</small>
-              </div>
-              <div class="settings-row-btns">
-                <button type="button" class="mini-btn" @click="editCustom(item.id)">编辑</button>
-                <button type="button" class="mini-btn" @click="testCustom(item)">测试执行</button>
-                <button type="button" class="mini-btn mini-btn-danger" @click="removeCustom(item.id)">删除</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="custom-editor">
-            <h3>{{ editingCustomId ? "编辑自定义按钮" : "新建自定义按钮" }}</h3>
-            <div class="settings-grid">
-              <label>
-                名称
-                <input v-model.trim="customForm.label" type="text" placeholder="按钮名称" />
-              </label>
-              <label>
-                加载文案
-                <input v-model.trim="customForm.loadingLabel" type="text" placeholder="正在执行..." />
-              </label>
-              <label>
-                颜色
-                <select v-model="customForm.variant">
-                  <option value="pink">粉色</option>
-                  <option value="beige">米色</option>
-                </select>
-              </label>
-              <label>
-                搜索别名（逗号分隔）
-                <input v-model.trim="customForm.searchAliasesText" type="text" placeholder="alias1, alias2" />
-              </label>
-              <label>
-                页面
-                <select v-model="customForm.pageId" @change="ensureCustomFormGroup">
-                  <option value="page1">页面一</option>
-                  <option value="page2">页面二</option>
-                </select>
-              </label>
-              <label>
-                分组
-                <select v-model="customForm.groupId">
-                  <option v-for="group in groupsForPage(customForm.pageId)" :key="group.id" :value="group.id">
-                    {{ group.title }}
-                  </option>
-                </select>
-              </label>
-              <label>
-                尺寸
-                <select v-model="customForm.size">
-                  <option value="small">小（半宽）</option>
-                  <option value="large">大（整行）</option>
-                </select>
-              </label>
-              <label>
-                执行器类型
-                <select v-model="customForm.executorKind">
-                  <option value="builtin_ref">引用内置动作</option>
-                  <option value="custom_intent">自定义 Intent</option>
-                </select>
-              </label>
-            </div>
-
-            <div v-if="customForm.executorKind === 'builtin_ref'" class="settings-grid">
-              <label>
-                内置动作
-                <select v-model="customForm.builtinActionKey">
-                  <option v-for="item in editableBuiltinOptions" :key="item.key" :value="item.key">
-                    {{ item.label }}
-                  </option>
-                </select>
-              </label>
-            </div>
-
-            <div v-else class="settings-grid">
-              <label>
-                Action
-                <input v-model.trim="customForm.action" type="text" placeholder="android.intent.action.VIEW" />
-              </label>
-              <label>
-                包名
-                <input v-model.trim="customForm.packageName" type="text" placeholder="com.example.app" />
-              </label>
-              <label>
-                Activity
-                <input v-model.trim="customForm.className" type="text" placeholder="com.example.app.MainActivity" />
-              </label>
-              <label>
-                URL（自动补全 https）
-                <input v-model.trim="customForm.url" type="text" placeholder="example.com" />
-              </label>
-              <label>
-                Data URI
-                <input v-model.trim="customForm.dataUri" type="text" placeholder="geo:0,0?q=外滩" />
-              </label>
-              <label>
-                MIME Type
-                <input v-model.trim="customForm.mimeType" type="text" placeholder="text/plain" />
-              </label>
-              <label>
-                Categories（逗号分隔）
-                <input v-model.trim="customForm.categoriesText" type="text" placeholder="android.intent.category.DEFAULT" />
-              </label>
-              <label>
-                Extras（JSON 对象）
-                <textarea
-                  v-model.trim="customForm.extrasJson"
-                  rows="3"
-                  placeholder='{"key":"value","count":1}'
-                />
-              </label>
-            </div>
-
-            <div class="settings-row-btns">
-              <button type="button" class="mini-btn" @click="saveCustomForm">
-                {{ editingCustomId ? "保存修改" : "添加按钮" }}
-              </button>
-              <button type="button" class="mini-btn" @click="testCustomForm">测试执行</button>
-              <button type="button" class="mini-btn" @click="startCreateCustom">重置表单</button>
-            </div>
-          </div>
-        </article>
-      </section>
-
-      <section class="status-panel">
-        <p class="status-label">最近操作</p>
-        <p class="status-message">{{ displayMessage }}</p>
-      </section>
-
-      <nav class="bottom-nav" aria-label="页面导航">
-        <button
-          v-for="item in navItems"
-          :key="item.id"
-          type="button"
-          class="nav-btn"
-          :class="{ active: activePage === item.id }"
-          @click="switchPage(item.id)"
+      <section
+        ref="swipeStageRef"
+        class="swipe-stage"
+        @touchstart.passive="onSwipeTouchStart"
+        @touchmove="onSwipeTouchMove"
+        @touchend="onSwipeTouchEnd"
+        @touchcancel="onSwipeTouchCancel"
+      >
+        <div
+          class="page-track"
+          :class="{ 'is-animating': isTrackAnimating, 'is-dragging': isSwipeDragging }"
+          :style="trackStyle"
+          @transitionend="onTrackTransitionEnd"
         >
-          <span class="nav-btn-bg">
-            <img :src="item.icon" :alt="item.label" class="nav-icon" />
-          </span>
-        </button>
-      </nav>
+          <section
+            v-for="(pageId, trackIndex) in trackPages"
+            :key="`${pageId}-${trackIndex}`"
+            class="track-page"
+          >
+            <article
+              class="zone2-panel page-scroll"
+              :data-page-id="pageId"
+              :ref="(el) => setPageContainerRef(pageId, trackIndex, el as HTMLElement | null)"
+            >
+              <template v-if="pageId !== 'settings'">
+                <div v-if="runtimeGroupsForPage(pageId).length === 0" class="search-empty">
+                  No group available.
+                </div>
+                <section
+                  v-for="group in runtimeGroupsForPage(pageId)"
+                  :key="group.id"
+                  class="zone2-group"
+                  :data-locate="`group-${pageId}-${group.id}`"
+                  :class="highlightClass(`group-${pageId}-${group.id}`)"
+                >
+                  <button type="button" class="group-header" @click="toggleRuntimeGroup(pageId, group.id)">
+                    <span>{{ group.title }}</span>
+                    <span>{{ isRuntimeGroupCollapsed(pageId, group.id) ? "Expand" : "Collapse" }}</span>
+                  </button>
+                  <div v-if="!isRuntimeGroupCollapsed(pageId, group.id)" class="extra-grid">
+                    <button
+                      v-for="entry in zone2EntriesByGroup(pageId, group.id)"
+                      :key="entry.id"
+                      type="button"
+                      class="action-btn action-btn--compact"
+                      :class="[
+                        spanClass(entry.size === 'large' ? 'full' : 'half'),
+                        variantClass(entry.variant),
+                        highlightClass(entry.locateKey),
+                        { 'is-disabled': entry.disabled },
+                      ]"
+                      :data-locate="entry.locateKey"
+                      :disabled="isLoading || entry.disabled"
+                      @click="runZone2Entry(entry)"
+                    >
+                      {{ zone2EntryLabel(entry) }}
+                    </button>
+                  </div>
+                </section>
+              </template>
+
+              <template v-else>
+                <section
+                  v-for="group in settingsGroups"
+                  :key="group.id"
+                  class="zone2-group settings-group"
+                  :data-locate="group.locateKey"
+                  :class="highlightClass(group.locateKey)"
+                >
+                  <button type="button" class="group-header" @click="toggleSettingsGroup(group.id)">
+                    <span>{{ group.title }}</span>
+                    <span>{{ isSettingsGroupCollapsed(group.id) ? "Expand" : "Collapse" }}</span>
+                  </button>
+                  <div v-if="!isSettingsGroupCollapsed(group.id)" class="settings-group-content">
+                    <template v-if="group.id === 'settings-save'">
+                      <p class="settings-help">
+                        Only config-driven content is editable. Save applies changes, revert restores last saved state.
+                      </p>
+                      <div class="settings-actions">
+                        <button
+                          type="button"
+                          class="action-btn action-btn--compact tone-beige"
+                          :disabled="!isDraftDirty"
+                          @click="saveDraftConfig"
+                        >
+                          Save Config
+                        </button>
+                        <button
+                          type="button"
+                          class="action-btn action-btn--compact tone-pink"
+                          :disabled="!isDraftDirty"
+                          @click="revertDraftConfig"
+                        >
+                          Revert Changes
+                        </button>
+                      </div>
+                    </template>
+
+                    <template v-else-if="group.id === 'settings-startup'">
+                      <div class="settings-grid">
+                        <label>
+                          Startup Mode
+                          <select v-model="draftConfig.startupPolicy.mode">
+                            <option value="fixed">Fixed Page</option>
+                            <option value="remember">Remember Last Page</option>
+                          </select>
+                        </label>
+                        <label>
+                          Fixed Page
+                          <select
+                            v-model="draftConfig.startupPolicy.fixedPageId"
+                            :disabled="draftConfig.startupPolicy.mode !== 'fixed'"
+                          >
+                            <option value="page1">Page 1</option>
+                            <option value="page2">Page 2</option>
+                            <option value="settings">Settings</option>
+                          </select>
+                        </label>
+                      </div>
+                      <p class="settings-help">
+                        Startup policy is saved manually. Last active page and collapsed state are auto-saved.
+                      </p>
+                    </template>
+
+                    <template v-else-if="group.id === 'settings-actions'">
+                      <div class="settings-grid">
+                        <div v-for="row in draftPlacementRows" :key="row.id" class="settings-row">
+                          <div class="settings-row-title">
+                            <strong>{{ row.label }}</strong>
+                            <small>{{ row.sourceLabel }}</small>
+                          </div>
+                          <label>
+                            Page
+                            <select :value="row.placement.pageId" @change="updateRowPage(row, $event)">
+                              <option value="page1">Page 1</option>
+                              <option value="page2">Page 2</option>
+                            </select>
+                          </label>
+                          <label>
+                            Group
+                            <select :value="row.placement.groupId" @change="updateRowGroup(row, $event)">
+                              <option
+                                v-for="runtimeGroup in groupsForPage(row.placement.pageId)"
+                                :key="runtimeGroup.id"
+                                :value="runtimeGroup.id"
+                              >
+                                {{ runtimeGroup.title }}
+                              </option>
+                            </select>
+                          </label>
+                          <label>
+                            Size
+                            <select :value="row.placement.size" @change="updateRowSize(row, $event)">
+                              <option value="small">Small</option>
+                              <option value="large">Large</option>
+                            </select>
+                          </label>
+                          <div class="settings-row-btns">
+                            <button type="button" class="mini-btn" @click="moveRow(row, -1)">Up</button>
+                            <button type="button" class="mini-btn" @click="moveRow(row, 1)">Down</button>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+
+                    <template v-else-if="group.id === 'settings-groups'">
+                      <div class="group-create">
+                        <label>
+                          Page
+                          <select v-model="newGroupForm.pageId">
+                            <option value="page1">Page 1</option>
+                            <option value="page2">Page 2</option>
+                          </select>
+                        </label>
+                        <label>
+                          Title
+                          <input v-model.trim="newGroupForm.title" type="text" placeholder="e.g. System Tools" />
+                        </label>
+                        <label class="checkbox-label">
+                          <input v-model="newGroupForm.collapsedByDefault" type="checkbox" />
+                          Collapsed by default
+                        </label>
+                        <button type="button" class="mini-btn" @click="createGroup">Create Group</button>
+                      </div>
+
+                      <div class="settings-grid">
+                        <div v-for="runtimeGroup in draftGroups" :key="runtimeGroup.id" class="settings-row">
+                          <div class="settings-row-title">
+                            <strong>{{ runtimeGroup.id }}</strong>
+                            <small>{{ runtimeGroup.pageId === "page1" ? "Page 1" : "Page 2" }}</small>
+                          </div>
+                          <label>
+                            Title
+                            <input v-model.trim="runtimeGroup.title" type="text" />
+                          </label>
+                          <label class="checkbox-label">
+                            <input v-model="runtimeGroup.collapsedByDefault" type="checkbox" />
+                            Collapsed by default
+                          </label>
+                          <div class="settings-row-btns">
+                            <button type="button" class="mini-btn" @click="moveGroup(runtimeGroup, -1)">Up</button>
+                            <button type="button" class="mini-btn" @click="moveGroup(runtimeGroup, 1)">Down</button>
+                            <button
+                              type="button"
+                              class="mini-btn mini-btn-danger"
+                              :disabled="groupHasRows(runtimeGroup)"
+                              @click="deleteGroup(runtimeGroup)"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <p class="settings-help">Groups with entries cannot be deleted until entries are moved out.</p>
+                    </template>
+
+                    <template v-else-if="group.id === 'settings-custom'">
+                      <p class="settings-help">
+                        Experimental custom actions support builtin reference or custom Intent/package/activity/action/url.
+                      </p>
+
+                      <div class="custom-toolbar">
+                        <button type="button" class="mini-btn" @click="startCreateCustom">Create Custom Action</button>
+                      </div>
+
+                      <div v-if="draftCustomActions.length > 0" class="custom-list">
+                        <div v-for="item in draftCustomActions" :key="item.id" class="custom-item">
+                          <div>
+                            <strong>{{ item.label }}</strong>
+                            <small>{{ item.id }}</small>
+                          </div>
+                          <div class="settings-row-btns">
+                            <button type="button" class="mini-btn" @click="editCustom(item.id)">Edit</button>
+                            <button type="button" class="mini-btn" @click="testCustom(item)">Test</button>
+                            <button type="button" class="mini-btn mini-btn-danger" @click="removeCustom(item.id)">
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="custom-editor">
+                        <h3>{{ editingCustomId ? "Edit Custom Action" : "Create Custom Action" }}</h3>
+                        <div class="settings-grid">
+                          <label>
+                            Name
+                            <input v-model.trim="customForm.label" type="text" placeholder="Action name" />
+                          </label>
+                          <label>
+                            Loading Label
+                            <input
+                              v-model.trim="customForm.loadingLabel"
+                              type="text"
+                              placeholder="Running..."
+                            />
+                          </label>
+                          <label>
+                            Variant
+                            <select v-model="customForm.variant">
+                              <option value="pink">Pink</option>
+                              <option value="beige">Beige</option>
+                            </select>
+                          </label>
+                          <label>
+                            Search Aliases
+                            <input v-model.trim="customForm.searchAliasesText" type="text" placeholder="alias1, alias2" />
+                          </label>
+                          <label>
+                            Page
+                            <select v-model="customForm.pageId" @change="ensureCustomFormGroup">
+                              <option value="page1">Page 1</option>
+                              <option value="page2">Page 2</option>
+                            </select>
+                          </label>
+                          <label>
+                            Group
+                            <select v-model="customForm.groupId">
+                              <option
+                                v-for="runtimeGroup in groupsForPage(customForm.pageId)"
+                                :key="runtimeGroup.id"
+                                :value="runtimeGroup.id"
+                              >
+                                {{ runtimeGroup.title }}
+                              </option>
+                            </select>
+                          </label>
+                          <label>
+                            Size
+                            <select v-model="customForm.size">
+                              <option value="small">Small</option>
+                              <option value="large">Large</option>
+                            </select>
+                          </label>
+                          <label>
+                            Executor
+                            <select v-model="customForm.executorKind">
+                              <option value="builtin_ref">Builtin Reference</option>
+                              <option value="custom_intent">Custom Intent</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <div v-if="customForm.executorKind === 'builtin_ref'" class="settings-grid">
+                          <label>
+                            Builtin Action
+                            <select v-model="customForm.builtinActionKey">
+                              <option v-for="option in editableBuiltinOptions" :key="option.key" :value="option.key">
+                                {{ option.label }}
+                              </option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <div v-else class="settings-grid">
+                          <label>
+                            Action
+                            <input
+                              v-model.trim="customForm.action"
+                              type="text"
+                              placeholder="android.intent.action.VIEW"
+                            />
+                          </label>
+                          <label>
+                            Package
+                            <input v-model.trim="customForm.packageName" type="text" placeholder="com.example.app" />
+                          </label>
+                          <label>
+                            Activity
+                            <input
+                              v-model.trim="customForm.className"
+                              type="text"
+                              placeholder="com.example.app.MainActivity"
+                            />
+                          </label>
+                          <label>
+                            URL
+                            <input v-model.trim="customForm.url" type="text" placeholder="https://example.com" />
+                          </label>
+                          <label>
+                            Data URI
+                            <input v-model.trim="customForm.dataUri" type="text" placeholder="content://..." />
+                          </label>
+                          <label>
+                            Mime Type
+                            <input v-model.trim="customForm.mimeType" type="text" placeholder="text/plain" />
+                          </label>
+                          <label>
+                            Categories (comma separated)
+                            <input
+                              v-model.trim="customForm.categoriesText"
+                              type="text"
+                              placeholder="android.intent.category.DEFAULT"
+                            />
+                          </label>
+                          <label>
+                            Extras (JSON object)
+                            <textarea
+                              v-model.trim="customForm.extrasJson"
+                              rows="4"
+                              placeholder='{"source":"launcher","debug":true}'
+                            />
+                          </label>
+                        </div>
+
+                        <div class="settings-row-btns">
+                          <button type="button" class="mini-btn" @click="saveCustomForm">Save Custom Action</button>
+                          <button type="button" class="mini-btn" @click="testCustomForm">Test Current Config</button>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </section>
+              </template>
+            </article>
+          </section>
+        </div>
+      </section>
+
+      <section class="bottom-fixed">
+        <section class="status-panel" aria-live="polite">
+          <p class="status-label">Recent Action</p>
+          <p class="status-message">{{ displayMessage }}</p>
+        </section>
+
+        <nav class="bottom-nav" aria-label="Page Navigation">
+          <button
+            v-for="item in navItems"
+            :key="item.id"
+            type="button"
+            class="nav-btn"
+            :class="{ active: activePage === item.id }"
+            @click="switchPage(item.id)"
+          >
+            <span class="nav-btn-bg">
+              <img :src="item.icon" :alt="item.label" class="nav-icon" />
+            </span>
+          </button>
+        </nav>
+      </section>
     </section>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
   type LaunchIntentOptions,
   type OpenAppCommandResult,
@@ -368,14 +440,19 @@ import {
 import { MiuiPower } from "./plugins/miuiPower";
 import {
   buildDefaultLauncherConfig,
+  buildDefaultLauncherUiState,
   cloneLauncherConfig,
   type CustomAction,
   type CustomIntentExecutor,
   LAUNCHER_CONFIG_VERSION,
   loadLauncherConfig,
+  loadLauncherUiState,
   normalizeLauncherConfig,
-  type LauncherConfigV2,
+  type LauncherConfigV3,
+  type LauncherUiState,
+  type RuntimePageId as LauncherRuntimePageId,
   saveLauncherConfig,
+  saveLauncherUiState,
   type Zone2Group,
   type Zone2Placement,
   type Zone2Size,
@@ -385,7 +462,7 @@ import page1Icon from "./assets/nav-page-1.svg";
 import page2Icon from "./assets/nav-page-2.svg";
 import page3Icon from "./assets/nav-page-3.svg";
 
-type RuntimePageId = "page1" | "page2" | "settings";
+type RuntimePageId = LauncherRuntimePageId;
 type ActionVariant = "pink" | "beige";
 type CellSpan = "half" | "full";
 
@@ -396,11 +473,6 @@ interface ActionItem {
   variant: ActionVariant;
   run?: () => Promise<void>;
   disabled?: boolean;
-}
-
-interface LayoutCell {
-  key: string;
-  span: CellSpan;
 }
 
 interface NavItem {
@@ -434,6 +506,7 @@ interface SearchResultItem {
   hint: string;
   keywords: string[];
   groupId?: string;
+  groupScope?: "runtime" | "settings";
 }
 
 interface DraftPlacementRow {
@@ -466,16 +539,44 @@ interface CustomFormState {
   extrasJson: string;
 }
 
+interface SettingsGroupDefinition {
+  id: "settings-save" | "settings-startup" | "settings-actions" | "settings-groups" | "settings-custom";
+  title: string;
+  locateKey: string;
+  collapsedByDefault: boolean;
+}
+
+interface SwipeSession {
+  active: boolean;
+  startedOnInteractive: boolean;
+  startX: number;
+  startY: number;
+  isHorizontal: boolean;
+}
+
 const activePage = ref<RuntimePageId>("page1");
-const runtimeStageRef = ref<HTMLElement | null>(null);
-const settingsStageRef = ref<HTMLElement | null>(null);
+const swipeStageRef = ref<HTMLElement | null>(null);
+const pageContainerRefs = new Map<RuntimePageId, HTMLElement>();
+const uiState = ref<LauncherUiState>(loadLauncherUiState(buildDefaultLauncherUiState()));
 const searchKeyword = ref("");
 
 const loadingAction = ref("");
 const message = ref("");
+const stageWidth = ref(1);
+const virtualTrackIndex = ref(1);
+const dragOffset = ref(0);
+const isTrackAnimating = ref(false);
+const isSwipeDragging = ref(false);
+const swipeSession = reactive<SwipeSession>({
+  active: false,
+  startedOnInteractive: false,
+  startX: 0,
+  startY: 0,
+  isHorizontal: false,
+});
 
 const isLoading = computed(() => loadingAction.value !== "");
-const displayMessage = computed(() => message.value || "等待操作，请点击一个入口按钮。");
+const displayMessage = computed(() => message.value || "Waiting for action. Tap any entry button.");
 
 function spanClass(span: CellSpan) {
   return span === "full" ? "span-full" : "span-half";
@@ -988,40 +1089,21 @@ const actionByKey: Record<string, ActionItem> = {
   },
 };
 
-const fixedZone1Layouts: Record<ZonePageId, LayoutCell[][]> = {
-  page1: [
-    [
-      { key: "bootShutdown", span: "half" },
-      { key: "developerOptions", span: "half" },
-    ],
-    [
-      { key: "accessibility", span: "half" },
-      { key: "screenRefreshRate", span: "half" },
-    ],
-    [{ key: "wirelessDebugging", span: "full" }],
-    [
-      { key: "focusOverlay", span: "half" },
-      { key: "stopFocusOverlay", span: "half" },
-    ],
-  ],
-  page2: [
-    [
-      { key: "honorOfKings", span: "half" },
-      { key: "openBilibili", span: "half" },
-    ],
-    [
-      { key: "openWeChat", span: "half" },
-      { key: "qqPlaceholder", span: "half" },
-    ],
-    [{ key: "openQQMusic", span: "full" }],
-    [
-      { key: "openCamera", span: "half" },
-      { key: "openGallery", span: "half" },
-    ],
-  ],
-};
-
 const editableBuiltinKeys = [
+  "bootShutdown",
+  "developerOptions",
+  "accessibility",
+  "screenRefreshRate",
+  "wirelessDebugging",
+  "focusOverlay",
+  "stopFocusOverlay",
+  "honorOfKings",
+  "openBilibili",
+  "openWeChat",
+  "qqPlaceholder",
+  "openQQMusic",
+  "openCamera",
+  "openGallery",
   "windowFocus",
   "screenTimePage",
   "usageAccessSettings",
@@ -1056,13 +1138,15 @@ const editableBuiltinKeys = [
 const editableBuiltinKeySet = new Set<string>(editableBuiltinKeys);
 
 const defaultGroups: Zone2Group[] = [
-  { id: "p1-system", pageId: "page1", title: "系统与权限", order: 0, collapsedByDefault: false },
-  { id: "p1-device", pageId: "page1", title: "设备工具", order: 1, collapsedByDefault: false },
-  { id: "p2-files", pageId: "page2", title: "文件与浏览器", order: 0, collapsedByDefault: false },
-  { id: "p2-map", pageId: "page2", title: "地图与定位", order: 1, collapsedByDefault: true },
-  { id: "p2-share", pageId: "page2", title: "分享与链接", order: 2, collapsedByDefault: true },
-  { id: "p2-media", pageId: "page2", title: "影音与拍摄", order: 3, collapsedByDefault: false },
-  { id: "p2-labs", pageId: "page2", title: "实验入口", order: 4, collapsedByDefault: true },
+  { id: "p1-common", pageId: "page1", title: "常用入口", order: 0, collapsedByDefault: false },
+  { id: "p1-system", pageId: "page1", title: "系统与权限", order: 1, collapsedByDefault: false },
+  { id: "p1-device", pageId: "page1", title: "设备工具", order: 2, collapsedByDefault: false },
+  { id: "p2-common", pageId: "page2", title: "常用入口", order: 0, collapsedByDefault: false },
+  { id: "p2-files", pageId: "page2", title: "文件与浏览器", order: 1, collapsedByDefault: false },
+  { id: "p2-map", pageId: "page2", title: "地图与定位", order: 2, collapsedByDefault: true },
+  { id: "p2-share", pageId: "page2", title: "分享与链接", order: 3, collapsedByDefault: true },
+  { id: "p2-media", pageId: "page2", title: "影音与拍摄", order: 4, collapsedByDefault: false },
+  { id: "p2-labs", pageId: "page2", title: "实验入口", order: 5, collapsedByDefault: true },
 ];
 
 function seed(
@@ -1089,6 +1173,20 @@ function seed(
 const defaultLauncherConfig = buildDefaultLauncherConfig({
   groups: defaultGroups,
   builtinActions: [
+    seed("bootShutdown", "page1", "p1-common", 0),
+    seed("developerOptions", "page1", "p1-common", 1),
+    seed("accessibility", "page1", "p1-common", 2),
+    seed("screenRefreshRate", "page1", "p1-common", 3),
+    seed("wirelessDebugging", "page1", "p1-common", 4, "large"),
+    seed("focusOverlay", "page1", "p1-common", 5),
+    seed("stopFocusOverlay", "page1", "p1-common", 6),
+    seed("honorOfKings", "page2", "p2-common", 0),
+    seed("openBilibili", "page2", "p2-common", 1),
+    seed("openWeChat", "page2", "p2-common", 2),
+    seed("qqPlaceholder", "page2", "p2-common", 3),
+    seed("openQQMusic", "page2", "p2-common", 4, "large"),
+    seed("openCamera", "page2", "p2-common", 5),
+    seed("openGallery", "page2", "p2-common", 6),
     seed("windowFocus", "page1", "p1-system", 0, "small", ["焦点", "窗口"]),
     seed("screenTimePage", "page1", "p1-system", 1),
     seed("usageAccessSettings", "page1", "p1-system", 2),
@@ -1121,21 +1219,18 @@ const defaultLauncherConfig = buildDefaultLauncherConfig({
   ],
 });
 
-const savedConfig = ref<LauncherConfigV2>(
+const savedConfig = ref<LauncherConfigV3>(
   loadLauncherConfig(defaultLauncherConfig, editableBuiltinKeySet),
 );
-const draftConfig = ref<LauncherConfigV2>(cloneLauncherConfig(savedConfig.value));
-
-const activeRuntimePage = computed<ZonePageId>(() => (activePage.value === "page2" ? "page2" : "page1"));
-const activeFixedRows = computed(() => fixedZone1Layouts[activeRuntimePage.value]);
+const draftConfig = ref<LauncherConfigV3>(cloneLauncherConfig(savedConfig.value));
 const isDraftDirty = computed(
   () => JSON.stringify(draftConfig.value) !== JSON.stringify(savedConfig.value),
 );
 
 const navItems: NavItem[] = [
-  { id: "page1", label: "页面一", icon: page1Icon },
-  { id: "page2", label: "页面二", icon: page2Icon },
-  { id: "settings", label: "设置中心", icon: page3Icon },
+  { id: "page1", label: "Page 1", icon: page1Icon },
+  { id: "page2", label: "Page 2", icon: page2Icon },
+  { id: "settings", label: "Settings", icon: page3Icon },
 ];
 
 const editableBuiltinOptions = computed(() =>
@@ -1148,16 +1243,70 @@ const editableBuiltinOptions = computed(() =>
 const collapsedGroupMap = ref<Record<string, boolean>>({});
 const highlightedLocateKey = ref("");
 let highlightTimer: number | null = null;
+let stageResizeObserver: ResizeObserver | null = null;
 
-function groupStateKey(pageId: ZonePageId, groupId: string) {
-  return `${pageId}|${groupId}`;
+const pageOrder: RuntimePageId[] = ["page1", "page2", "settings"];
+const settingsGroups: SettingsGroupDefinition[] = [
+  { id: "settings-save", title: "保存与撤销", locateKey: "settings-save", collapsedByDefault: false },
+  { id: "settings-startup", title: "启动页策略", locateKey: "settings-startup", collapsedByDefault: false },
+  { id: "settings-actions", title: "按钮分配", locateKey: "settings-actions", collapsedByDefault: false },
+  { id: "settings-groups", title: "分组管理", locateKey: "settings-groups", collapsedByDefault: true },
+  { id: "settings-custom", title: "自定义按钮", locateKey: "settings-custom", collapsedByDefault: true },
+];
+
+const trackIndexByPage: Record<RuntimePageId, number> = {
+  page1: 1,
+  page2: 2,
+  settings: 3,
+};
+
+const trackPages = computed<RuntimePageId[]>(() => [
+  pageOrder[pageOrder.length - 1],
+  ...pageOrder,
+  pageOrder[0],
+]);
+
+const trackStyle = computed(() => ({
+  transform: `translate3d(${-(virtualTrackIndex.value * stageWidth.value) + dragOffset.value}px, 0, 0)`,
+  transition: isTrackAnimating.value ? "transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1)" : "none",
+}));
+
+function pageIndex(pageId: RuntimePageId) {
+  return pageOrder.indexOf(pageId);
 }
 
-function switchPage(pageId: RuntimePageId) {
-  activePage.value = pageId;
-  if (pageId === "settings") {
-    searchKeyword.value = "";
-  }
+function nextPageId(pageId: RuntimePageId): RuntimePageId {
+  return pageOrder[(pageIndex(pageId) + 1) % pageOrder.length];
+}
+
+function previousPageId(pageId: RuntimePageId): RuntimePageId {
+  return pageOrder[(pageIndex(pageId) + pageOrder.length - 1) % pageOrder.length];
+}
+
+function resolveStartupPage(config: LauncherConfigV3, state: LauncherUiState): RuntimePageId {
+  return config.startupPolicy.mode === "remember" ? state.lastActivePage : config.startupPolicy.fixedPageId;
+}
+
+function runtimeGroupStateKey(pageId: ZonePageId, groupId: string) {
+  return `runtime|${pageId}|${groupId}`;
+}
+
+function settingsGroupStateKey(groupId: string) {
+  return `settings|${groupId}`;
+}
+
+activePage.value = resolveStartupPage(savedConfig.value, uiState.value);
+virtualTrackIndex.value = trackIndexByPage[activePage.value];
+collapsedGroupMap.value = { ...uiState.value.collapsedGroups };
+
+function persistUiState() {
+  const nextState: LauncherUiState = {
+    version: uiState.value.version,
+    lastActivePage: activePage.value,
+    collapsedGroups: { ...collapsedGroupMap.value },
+  };
+  uiState.value = nextState;
+  saveLauncherUiState(nextState);
 }
 
 function highlightClass(locateKey: string) {
@@ -1179,7 +1328,11 @@ function markHighlight(locateKey: string) {
 function syncCollapsedGroupMap() {
   const next: Record<string, boolean> = {};
   for (const group of savedConfig.value.groups) {
-    const key = groupStateKey(group.pageId, group.id);
+    const key = runtimeGroupStateKey(group.pageId, group.id);
+    next[key] = collapsedGroupMap.value[key] ?? group.collapsedByDefault;
+  }
+  for (const group of settingsGroups) {
+    const key = settingsGroupStateKey(group.id);
     next[key] = collapsedGroupMap.value[key] ?? group.collapsedByDefault;
   }
   collapsedGroupMap.value = next;
@@ -1193,8 +1346,23 @@ watch(
   { deep: true, immediate: true },
 );
 
-function toggleGroup(pageId: ZonePageId, groupId: string) {
-  const key = groupStateKey(pageId, groupId);
+watch(activePage, () => {
+  persistUiState();
+});
+
+watch(
+  collapsedGroupMap,
+  () => {
+    persistUiState();
+  },
+  { deep: true },
+);
+
+function toggleRuntimeGroup(pageId: RuntimePageId, groupId: string) {
+  if (pageId === "settings") {
+    return;
+  }
+  const key = runtimeGroupStateKey(pageId, groupId);
   const previous = collapsedGroupMap.value[key] ?? false;
   collapsedGroupMap.value = {
     ...collapsedGroupMap.value,
@@ -1202,16 +1370,207 @@ function toggleGroup(pageId: ZonePageId, groupId: string) {
   };
 }
 
-function setGroupCollapsed(pageId: ZonePageId, groupId: string, collapsed: boolean) {
+function setRuntimeGroupCollapsed(pageId: RuntimePageId, groupId: string, collapsed: boolean) {
+  if (pageId === "settings") {
+    return;
+  }
   collapsedGroupMap.value = {
     ...collapsedGroupMap.value,
-    [groupStateKey(pageId, groupId)]: collapsed,
+    [runtimeGroupStateKey(pageId, groupId)]: collapsed,
   };
 }
 
-function isGroupCollapsed(pageId: ZonePageId, groupId: string) {
-  return collapsedGroupMap.value[groupStateKey(pageId, groupId)] ?? false;
+function isRuntimeGroupCollapsed(pageId: RuntimePageId, groupId: string) {
+  if (pageId === "settings") {
+    return false;
+  }
+  return collapsedGroupMap.value[runtimeGroupStateKey(pageId, groupId)] ?? false;
 }
+
+function toggleSettingsGroup(groupId: SettingsGroupDefinition["id"]) {
+  const key = settingsGroupStateKey(groupId);
+  const previous = collapsedGroupMap.value[key] ?? false;
+  collapsedGroupMap.value = {
+    ...collapsedGroupMap.value,
+    [key]: !previous,
+  };
+}
+
+function setSettingsGroupCollapsed(groupId: SettingsGroupDefinition["id"], collapsed: boolean) {
+  collapsedGroupMap.value = {
+    ...collapsedGroupMap.value,
+    [settingsGroupStateKey(groupId)]: collapsed,
+  };
+}
+
+function isSettingsGroupCollapsed(groupId: SettingsGroupDefinition["id"]) {
+  return collapsedGroupMap.value[settingsGroupStateKey(groupId)] ?? false;
+}
+
+function isSettingsGroupId(value: string): value is SettingsGroupDefinition["id"] {
+  return settingsGroups.some((group) => group.id === value);
+}
+
+function switchPage(pageId: RuntimePageId) {
+  if (pageId === activePage.value || isTrackAnimating.value) {
+    return;
+  }
+  const direction: 1 | -1 = pageId === nextPageId(activePage.value) ? 1 : -1;
+  activePage.value = pageId;
+  dragOffset.value = 0;
+  isSwipeDragging.value = false;
+  isTrackAnimating.value = true;
+  virtualTrackIndex.value += direction;
+}
+
+function setPageContainerRef(pageId: RuntimePageId, trackIndex: number, element: HTMLElement | null) {
+  if (trackIndex !== trackIndexByPage[pageId]) {
+    return;
+  }
+  if (!element) {
+    pageContainerRefs.delete(pageId);
+    return;
+  }
+  pageContainerRefs.set(pageId, element);
+}
+
+function normalizeTrackIndexAfterLoop() {
+  const firstRealIndex = trackIndexByPage.page1;
+  const lastRealIndex = trackIndexByPage.settings;
+  if (virtualTrackIndex.value === 0) {
+    isTrackAnimating.value = false;
+    virtualTrackIndex.value = lastRealIndex;
+    return;
+  }
+  if (virtualTrackIndex.value === trackPages.value.length - 1) {
+    isTrackAnimating.value = false;
+    virtualTrackIndex.value = firstRealIndex;
+  }
+}
+
+function onTrackTransitionEnd() {
+  if (!isTrackAnimating.value) {
+    return;
+  }
+  isTrackAnimating.value = false;
+  normalizeTrackIndexAfterLoop();
+}
+
+function isInteractiveTouchTarget(target: EventTarget | null) {
+  const element = target as HTMLElement | null;
+  if (!element) {
+    return false;
+  }
+  return Boolean(element.closest("input, textarea, select, option, [contenteditable=''], [contenteditable='true']"));
+}
+
+function hasFocusedFormControl() {
+  const active = document.activeElement as HTMLElement | null;
+  if (!active) {
+    return false;
+  }
+  if (active.matches("input, textarea, select, [contenteditable=''], [contenteditable='true']")) {
+    return true;
+  }
+  return Boolean(active.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
+}
+
+function resetSwipeSession() {
+  swipeSession.active = false;
+  swipeSession.startedOnInteractive = false;
+  swipeSession.isHorizontal = false;
+  dragOffset.value = 0;
+  isSwipeDragging.value = false;
+}
+
+function onSwipeTouchStart(event: TouchEvent) {
+  if (event.touches.length !== 1 || isTrackAnimating.value) {
+    return;
+  }
+  const touch = event.touches[0];
+  swipeSession.active = true;
+  swipeSession.startedOnInteractive = isInteractiveTouchTarget(event.target) || hasFocusedFormControl();
+  swipeSession.startX = touch.clientX;
+  swipeSession.startY = touch.clientY;
+  swipeSession.isHorizontal = false;
+}
+
+function onSwipeTouchMove(event: TouchEvent) {
+  if (!swipeSession.active || swipeSession.startedOnInteractive || event.touches.length !== 1) {
+    return;
+  }
+  const touch = event.touches[0];
+  const deltaX = touch.clientX - swipeSession.startX;
+  const deltaY = touch.clientY - swipeSession.startY;
+
+  if (!swipeSession.isHorizontal) {
+    if (Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY)) {
+      swipeSession.isHorizontal = true;
+      isSwipeDragging.value = true;
+    } else if (Math.abs(deltaY) > 8 && Math.abs(deltaY) >= Math.abs(deltaX)) {
+      swipeSession.active = false;
+      return;
+    }
+  }
+
+  if (!swipeSession.isHorizontal) {
+    return;
+  }
+  event.preventDefault();
+  dragOffset.value = deltaX;
+}
+
+function onSwipeTouchEnd() {
+  if (!swipeSession.active || swipeSession.startedOnInteractive || !swipeSession.isHorizontal) {
+    resetSwipeSession();
+    return;
+  }
+  const threshold = Math.max(56, stageWidth.value * 0.18);
+  const drag = dragOffset.value;
+  resetSwipeSession();
+
+  if (Math.abs(drag) < threshold) {
+    isTrackAnimating.value = true;
+    return;
+  }
+
+  const direction: 1 | -1 = drag < 0 ? 1 : -1;
+  const target = direction === 1 ? nextPageId(activePage.value) : previousPageId(activePage.value);
+  activePage.value = target;
+  isTrackAnimating.value = true;
+  virtualTrackIndex.value += direction;
+}
+
+function onSwipeTouchCancel() {
+  resetSwipeSession();
+}
+
+function updateStageWidth() {
+  stageWidth.value = Math.max(1, swipeStageRef.value?.clientWidth ?? 1);
+}
+
+onMounted(() => {
+  updateStageWidth();
+  if (typeof ResizeObserver !== "undefined") {
+    stageResizeObserver = new ResizeObserver(() => {
+      updateStageWidth();
+    });
+    if (swipeStageRef.value) {
+      stageResizeObserver.observe(swipeStageRef.value);
+    }
+  }
+  window.addEventListener("resize", updateStageWidth);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", updateStageWidth);
+  stageResizeObserver?.disconnect();
+  stageResizeObserver = null;
+  if (highlightTimer !== null) {
+    window.clearTimeout(highlightTimer);
+    highlightTimer = null;
+  }
+});
 
 const runtimeGroupsByPage = computed<Record<ZonePageId, Zone2Group[]>>(() => ({
   page1: savedConfig.value.groups
@@ -1222,7 +1581,12 @@ const runtimeGroupsByPage = computed<Record<ZonePageId, Zone2Group[]>>(() => ({
     .sort((left, right) => left.order - right.order || left.title.localeCompare(right.title)),
 }));
 
-const activeZone2Groups = computed(() => runtimeGroupsByPage.value[activeRuntimePage.value]);
+function runtimeGroupsForPage(pageId: RuntimePageId): Zone2Group[] {
+  if (pageId === "settings") {
+    return [];
+  }
+  return runtimeGroupsByPage.value[pageId];
+}
 
 function normalizeUrlLikeBrowser(raw: string | undefined) {
   const value = (raw ?? "").trim();
@@ -1311,7 +1675,7 @@ const runtimeZone2Entries = computed<RuntimeZone2Entry[]>(() => {
 const runtimeZone2EntryMap = computed(() => {
   const map = new Map<string, RuntimeZone2Entry[]>();
   for (const entry of runtimeZone2Entries.value) {
-    const key = groupStateKey(entry.pageId, entry.groupId);
+    const key = runtimeGroupStateKey(entry.pageId, entry.groupId);
     const rows = map.get(key) ?? [];
     rows.push(entry);
     map.set(key, rows);
@@ -1323,7 +1687,7 @@ const runtimeZone2EntryMap = computed(() => {
 });
 
 function zone2EntriesByGroup(pageId: ZonePageId, groupId: string) {
-  return runtimeZone2EntryMap.value.get(groupStateKey(pageId, groupId)) ?? [];
+  return runtimeZone2EntryMap.value.get(runtimeGroupStateKey(pageId, groupId)) ?? [];
 }
 
 function zone2EntryLabel(entry: RuntimeZone2Entry) {
@@ -1418,61 +1782,56 @@ function locateInContainer(container: HTMLElement | null, locateKey: string) {
 
 const searchSettingItems: SearchResultItem[] = [
   {
+    id: "settings-save",
+    pageId: "settings",
+    locateKey: "settings-save",
+    label: "Save / Revert",
+    hint: "Settings",
+    keywords: ["save", "revert", "settings", "draft"],
+    groupId: "settings-save",
+    groupScope: "settings",
+  },
+  {
+    id: "settings-startup",
+    pageId: "settings",
+    locateKey: "settings-startup",
+    label: "Startup Policy",
+    hint: "Settings",
+    keywords: ["startup", "policy", "remember", "fixed", "page"],
+    groupId: "settings-startup",
+    groupScope: "settings",
+  },
+  {
     id: "settings-actions",
     pageId: "settings",
     locateKey: "settings-actions",
-    label: "区域二按钮分配",
-    hint: "设置中心 · 分配与排序",
-    keywords: ["区域二", "按钮分配", "排序", "尺寸"],
+    label: "Button Placement",
+    hint: "Settings",
+    keywords: ["button", "placement", "layout", "size"],
+    groupId: "settings-actions",
+    groupScope: "settings",
   },
   {
     id: "settings-groups",
     pageId: "settings",
     locateKey: "settings-groups",
-    label: "分组管理",
-    hint: "设置中心 · 分组标题与折叠",
-    keywords: ["分组", "折叠", "标题", "管理"],
+    label: "Group Management",
+    hint: "Settings",
+    keywords: ["group", "collapse", "title", "manage"],
+    groupId: "settings-groups",
+    groupScope: "settings",
   },
   {
     id: "settings-custom",
     pageId: "settings",
     locateKey: "settings-custom",
-    label: "自定义按钮（实验）",
-    hint: "设置中心 · 实验功能",
-    keywords: ["自定义", "intent", "action", "activity", "url", "实验"],
-  },
-  {
-    id: "settings-save",
-    pageId: "settings",
-    locateKey: "settings-save",
-    label: "保存或撤销配置",
-    hint: "设置中心 · 保存入口",
-    keywords: ["保存", "撤销", "草稿", "配置"],
+    label: "Custom Actions",
+    hint: "Settings",
+    keywords: ["custom", "intent", "action", "activity", "url", "experimental"],
+    groupId: "settings-custom",
+    groupScope: "settings",
   },
 ];
-
-const fixedSearchItems = computed<SearchResultItem[]>(() => {
-  const output: SearchResultItem[] = [];
-  (["page1", "page2"] as const).forEach((pageId) => {
-    const rowKeys = fixedZone1Layouts[pageId].flatMap((row) => row.map((cell) => cell.key));
-    const uniqueKeys = [...new Set(rowKeys)];
-    uniqueKeys.forEach((key) => {
-      const action = actionByKey[key];
-      if (!action) {
-        return;
-      }
-      output.push({
-        id: `fixed-${pageId}-${key}`,
-        pageId,
-        locateKey: `action-${pageId}-${key}`,
-        label: action.label,
-        hint: `${pageId === "page1" ? "页面一" : "页面二"} · 区域一`,
-        keywords: [action.label, key],
-      });
-    });
-  });
-  return output;
-});
 
 const searchResults = computed<SearchResultItem[]>(() => {
   const keyword = searchKeyword.value.trim().toLowerCase();
@@ -1480,17 +1839,25 @@ const searchResults = computed<SearchResultItem[]>(() => {
     return [];
   }
 
-  const zone2Items = runtimeZone2Entries.value.map<SearchResultItem>((entry) => ({
-    id: `zone2-${entry.id}`,
-    pageId: entry.pageId,
-    locateKey: entry.locateKey,
-    label: entry.label,
-    hint: `${entry.pageId === "page1" ? "页面一" : "页面二"} · 区域二`,
-    keywords: [entry.label, ...entry.searchAliases],
-    groupId: entry.groupId,
-  }));
+  const groupTitleByKey = new Map(
+    savedConfig.value.groups.map((group) => [runtimeGroupStateKey(group.pageId, group.id), group.title]),
+  );
 
-  const source = [...fixedSearchItems.value, ...zone2Items, ...searchSettingItems];
+  const zone2Items = runtimeZone2Entries.value.map<SearchResultItem>((entry) => {
+    const groupTitle = groupTitleByKey.get(runtimeGroupStateKey(entry.pageId, entry.groupId)) ?? "";
+    return {
+      id: `zone2-${entry.id}`,
+      pageId: entry.pageId,
+      locateKey: entry.locateKey,
+      label: entry.label,
+      hint: `${entry.pageId === "page1" ? "Page 1" : "Page 2"}${groupTitle ? ` · ${groupTitle}` : ""}`,
+      keywords: [entry.label, groupTitle, ...entry.searchAliases].filter((item) => item.length > 0),
+      groupId: entry.groupId,
+      groupScope: "runtime",
+    };
+  });
+
+  const source = [...zone2Items, ...searchSettingItems];
   return source
     .filter((item) =>
       item.keywords.some((term) => term.toLowerCase().includes(keyword)) ||
@@ -1501,19 +1868,15 @@ const searchResults = computed<SearchResultItem[]>(() => {
 
 async function locateFromSearch(item: SearchResultItem) {
   searchKeyword.value = "";
-  activePage.value = item.pageId;
-
-  if (item.pageId === "page1" || item.pageId === "page2") {
-    if (item.groupId) {
-      setGroupCollapsed(item.pageId, item.groupId, false);
-    }
-    await nextTick();
-    locateInContainer(runtimeStageRef.value, item.locateKey);
-    return;
+  switchPage(item.pageId);
+  if (item.groupId && item.groupScope === "runtime" && (item.pageId === "page1" || item.pageId === "page2")) {
+    setRuntimeGroupCollapsed(item.pageId, item.groupId, false);
   }
-
+  if (item.groupId && item.groupScope === "settings" && isSettingsGroupId(item.groupId)) {
+    setSettingsGroupCollapsed(item.groupId, false);
+  }
   await nextTick();
-  locateInContainer(settingsStageRef.value, item.locateKey);
+  locateInContainer(pageContainerRefs.get(item.pageId) ?? null, item.locateKey);
 }
 
 function groupsForPage(pageId: ZonePageId) {
@@ -2043,6 +2406,7 @@ function saveDraftConfig() {
   const normalized = normalizeLauncherConfig(
     {
       version: LAUNCHER_CONFIG_VERSION,
+      startupPolicy: draftConfig.value.startupPolicy,
       groups: draftConfig.value.groups,
       builtinActions: draftConfig.value.builtinActions,
       customActions: draftConfig.value.customActions,
@@ -2054,15 +2418,16 @@ function saveDraftConfig() {
   draftConfig.value = cloneLauncherConfig(normalized);
   saveLauncherConfig(normalized);
   syncCollapsedGroupMap();
-  message.value = "配置已保存。";
+  message.value = "Configuration saved.";
 }
 
 function revertDraftConfig() {
   draftConfig.value = cloneLauncherConfig(savedConfig.value);
   startCreateCustom();
-  message.value = "已撤销到上次保存状态。";
+  message.value = "Reverted to last saved configuration.";
 }
 
 startCreateCustom();
 ensureCustomFormGroup();
 </script>
+

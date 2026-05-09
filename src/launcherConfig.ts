@@ -1,11 +1,22 @@
-export const LAUNCHER_CONFIG_STORAGE_KEY = "launcher.config.v2";
-export const LAUNCHER_CONFIG_VERSION = 2 as const;
+export const LAUNCHER_CONFIG_STORAGE_KEY = "launcher.config.v3";
+const LEGACY_LAUNCHER_CONFIG_STORAGE_KEY = "launcher.config.v2";
+export const LAUNCHER_CONFIG_VERSION = 3 as const;
+
+export const LAUNCHER_UI_STATE_STORAGE_KEY = "launcher.ui-state.v1";
+export const LAUNCHER_UI_STATE_VERSION = 1 as const;
 
 export type ZonePageId = "page1" | "page2";
+export type RuntimePageId = ZonePageId | "settings";
 export type Zone2Size = "small" | "large";
 export type ActionVariant = "pink" | "beige";
 export type CustomExecutorKind = "builtin_ref" | "custom_intent";
 export type CustomIntentExtraValue = string | number | boolean;
+export type StartupPolicyMode = "remember" | "fixed";
+
+export interface StartupPolicy {
+  mode: StartupPolicyMode;
+  fixedPageId: RuntimePageId;
+}
 
 export interface Zone2Placement {
   pageId: ZonePageId;
@@ -69,6 +80,22 @@ export interface LauncherConfigV2 {
   customActions: CustomAction[];
 }
 
+export interface LauncherConfigV3 {
+  version: 3;
+  startupPolicy: StartupPolicy;
+  groups: Zone2Group[];
+  builtinActions: BuiltinAction[];
+  customActions: CustomAction[];
+}
+
+export type LauncherConfig = LauncherConfigV3;
+
+export interface LauncherUiState {
+  version: 1;
+  lastActivePage: RuntimePageId;
+  collapsedGroups: Record<string, boolean>;
+}
+
 export interface BuiltinActionSeed {
   actionKey: string;
   label: string;
@@ -79,9 +106,14 @@ export interface BuiltinActionSeed {
 export interface LauncherConfigDefaults {
   groups: Zone2Group[];
   builtinActions: BuiltinActionSeed[];
+  startupPolicy?: StartupPolicy;
 }
 
 const PAGES: ZonePageId[] = ["page1", "page2"];
+const DEFAULT_STARTUP_POLICY: StartupPolicy = {
+  mode: "fixed",
+  fixedPageId: "page1",
+};
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -105,6 +137,25 @@ function normalizeVariant(value: unknown): ActionVariant {
 
 function normalizePageId(value: unknown, fallback: ZonePageId = "page2"): ZonePageId {
   return value === "page1" || value === "page2" ? value : fallback;
+}
+
+function normalizeRuntimePageId(value: unknown, fallback: RuntimePageId = "page1"): RuntimePageId {
+  return value === "page1" || value === "page2" || value === "settings" ? value : fallback;
+}
+
+function normalizeStartupPolicyMode(
+  value: unknown,
+  fallback: StartupPolicyMode = "fixed",
+): StartupPolicyMode {
+  return value === "remember" || value === "fixed" ? value : fallback;
+}
+
+function normalizeStartupPolicy(raw: unknown, fallback: StartupPolicy): StartupPolicy {
+  const source = isObject(raw) ? raw : {};
+  return {
+    mode: normalizeStartupPolicyMode(source.mode, fallback.mode),
+    fixedPageId: normalizeRuntimePageId(source.fixedPageId, fallback.fixedPageId),
+  };
 }
 
 function normalizeAliases(value: unknown): string[] {
@@ -435,7 +486,7 @@ function normalizeCustomActions(
     normalized.push({
       id,
       type: "custom",
-      label: normalizeText(item.label) || `自定义按钮 ${index + 1}`,
+      label: normalizeText(item.label) || `自定义按钮${index + 1}`,
       loadingLabel: normalizeText(item.loadingLabel) || "正在执行...",
       variant: normalizeVariant(item.variant),
       experimental: true,
@@ -448,7 +499,7 @@ function normalizeCustomActions(
   return normalized;
 }
 
-function resequenceOrders(config: LauncherConfigV2) {
+function resequenceOrders(config: LauncherConfigV3) {
   const buckets = new Map<string, Array<{ id: string; label: string; placement: Zone2Placement }>>();
 
   const put = (id: string, label: string, placement: Zone2Placement) => {
@@ -474,7 +525,7 @@ function resequenceOrders(config: LauncherConfigV2) {
   }
 }
 
-export function buildDefaultLauncherConfig(defaults: LauncherConfigDefaults): LauncherConfigV2 {
+export function buildDefaultLauncherConfig(defaults: LauncherConfigDefaults): LauncherConfigV3 {
   const groups = defaults.groups.map((group) => ({
     ...group,
     id: normalizeId(group.id, `group-${group.pageId}`),
@@ -495,8 +546,9 @@ export function buildDefaultLauncherConfig(defaults: LauncherConfigDefaults): La
     },
   }));
 
-  const config: LauncherConfigV2 = {
+  const config: LauncherConfigV3 = {
     version: LAUNCHER_CONFIG_VERSION,
+    startupPolicy: normalizeStartupPolicy(defaults.startupPolicy, DEFAULT_STARTUP_POLICY),
     groups,
     builtinActions,
     customActions: [],
@@ -506,15 +558,15 @@ export function buildDefaultLauncherConfig(defaults: LauncherConfigDefaults): La
   return normalizeLauncherConfig(config, config, validBuiltinKeys);
 }
 
-export function cloneLauncherConfig(config: LauncherConfigV2): LauncherConfigV2 {
+export function cloneLauncherConfig(config: LauncherConfigV3): LauncherConfigV3 {
   return deepClone(config);
 }
 
 export function normalizeLauncherConfig(
   raw: unknown,
-  defaults: LauncherConfigV2,
+  defaults: LauncherConfigV3,
   validBuiltinKeys: Set<string>,
-): LauncherConfigV2 {
+): LauncherConfigV3 {
   const source = isObject(raw) ? raw : {};
   const groups = normalizeGroups(source.groups, defaults.groups);
   const groupsByPage = buildGroupsByPage(groups);
@@ -526,9 +578,11 @@ export function normalizeLauncherConfig(
     groupsByPage,
   );
   const customActions = normalizeCustomActions(source.customActions, groupsByPage, validBuiltinKeys);
+  const startupPolicy = normalizeStartupPolicy(source.startupPolicy, defaults.startupPolicy);
 
-  const normalized: LauncherConfigV2 = {
+  const normalized: LauncherConfigV3 = {
     version: LAUNCHER_CONFIG_VERSION,
+    startupPolicy,
     groups,
     builtinActions,
     customActions,
@@ -539,29 +593,94 @@ export function normalizeLauncherConfig(
 }
 
 export function loadLauncherConfig(
-  defaults: LauncherConfigV2,
+  defaults: LauncherConfigV3,
   validBuiltinKeys: Set<string>,
-): LauncherConfigV2 {
+): LauncherConfigV3 {
   if (typeof window === "undefined") {
     return cloneLauncherConfig(defaults);
   }
 
-  const rawText = window.localStorage.getItem(LAUNCHER_CONFIG_STORAGE_KEY);
+  const v3Text = window.localStorage.getItem(LAUNCHER_CONFIG_STORAGE_KEY);
+  const legacyText = window.localStorage.getItem(LEGACY_LAUNCHER_CONFIG_STORAGE_KEY);
+  const rawText = v3Text ?? legacyText;
+
   if (!rawText) {
     return cloneLauncherConfig(defaults);
   }
 
   try {
     const rawParsed = JSON.parse(rawText) as unknown;
-    return normalizeLauncherConfig(rawParsed, defaults, validBuiltinKeys);
+    const normalized = normalizeLauncherConfig(rawParsed, defaults, validBuiltinKeys);
+    if (!v3Text) {
+      window.localStorage.setItem(LAUNCHER_CONFIG_STORAGE_KEY, JSON.stringify(normalized));
+    }
+    return normalized;
   } catch {
     return cloneLauncherConfig(defaults);
   }
 }
 
-export function saveLauncherConfig(config: LauncherConfigV2) {
+export function saveLauncherConfig(config: LauncherConfigV3) {
   if (typeof window === "undefined") {
     return;
   }
   window.localStorage.setItem(LAUNCHER_CONFIG_STORAGE_KEY, JSON.stringify(config));
+}
+
+function normalizeBooleanMap(raw: unknown): Record<string, boolean> {
+  if (!isObject(raw)) {
+    return {};
+  }
+  const output: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const normalizedKey = normalizeText(key);
+    if (!normalizedKey) {
+      continue;
+    }
+    output[normalizedKey] = Boolean(value);
+  }
+  return output;
+}
+
+function normalizeLauncherUiState(raw: unknown, defaults: LauncherUiState): LauncherUiState {
+  const source = isObject(raw) ? raw : {};
+  return {
+    version: LAUNCHER_UI_STATE_VERSION,
+    lastActivePage: normalizeRuntimePageId(source.lastActivePage, defaults.lastActivePage),
+    collapsedGroups: normalizeBooleanMap(source.collapsedGroups),
+  };
+}
+
+export function buildDefaultLauncherUiState(): LauncherUiState {
+  return {
+    version: LAUNCHER_UI_STATE_VERSION,
+    lastActivePage: "page1",
+    collapsedGroups: {},
+  };
+}
+
+export function loadLauncherUiState(defaults: LauncherUiState = buildDefaultLauncherUiState()): LauncherUiState {
+  if (typeof window === "undefined") {
+    return deepClone(defaults);
+  }
+
+  const rawText = window.localStorage.getItem(LAUNCHER_UI_STATE_STORAGE_KEY);
+  if (!rawText) {
+    return deepClone(defaults);
+  }
+
+  try {
+    const rawParsed = JSON.parse(rawText) as unknown;
+    return normalizeLauncherUiState(rawParsed, defaults);
+  } catch {
+    return deepClone(defaults);
+  }
+}
+
+export function saveLauncherUiState(state: LauncherUiState) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const normalized = normalizeLauncherUiState(state, buildDefaultLauncherUiState());
+  window.localStorage.setItem(LAUNCHER_UI_STATE_STORAGE_KEY, JSON.stringify(normalized));
 }

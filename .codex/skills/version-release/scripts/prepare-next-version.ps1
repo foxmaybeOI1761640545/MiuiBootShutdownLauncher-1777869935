@@ -181,7 +181,7 @@ if (-not $DryRun) {
         '(?ms)"packages"\s*:\s*\{\s*""\s*:\s*\{[^{}]*?"version"\s*:\s*"([^"]+)"'
     )
     if (-not $lockRootPkgMatch.Success) {
-        throw "package-lock.json packages.\"\".version field not found."
+        throw 'package-lock.json packages."".version field not found.'
     }
     if ($lockRootPkgMatch.Groups[1].Value -ne $nextVersion) {
         throw "package-lock.json root package version mismatch. expected=$nextVersion actual=$($lockRootPkgMatch.Groups[1].Value)"
