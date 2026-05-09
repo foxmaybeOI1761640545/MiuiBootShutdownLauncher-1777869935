@@ -1,7 +1,7 @@
 {
   "name": "miui-boot-shutdown-launcher",
   "private": true,
-  "version": "1.0.16",
+  "version": "1.0.18",
   "type": "module",
   "scripts": {
     "dev": "vite",
