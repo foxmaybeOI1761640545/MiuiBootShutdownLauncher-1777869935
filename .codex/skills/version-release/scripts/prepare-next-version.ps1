@@ -159,18 +159,32 @@ foreach ($path in @($packageJsonPath, $packageLockPath, $buildGradlePath)) {
 }
 
 if (-not $DryRun) {
-    $pkg = Get-Content -Raw -LiteralPath $packageJsonPath -Encoding UTF8 | ConvertFrom-Json
-    $pkgLock = Get-Content -Raw -LiteralPath $packageLockPath -Encoding UTF8 | ConvertFrom-Json
+    $packageJsonText = Get-Content -Raw -LiteralPath $packageJsonPath -Encoding UTF8
+    $packageLockText = Get-Content -Raw -LiteralPath $packageLockPath -Encoding UTF8
     $gradleVerify = Read-TextNoBom -Path $buildGradlePath
 
-    if ($pkg.version -ne $nextVersion) {
-        throw "package.json version mismatch. expected=$nextVersion actual=$($pkg.version)"
+    $pkgVersionPattern = '(?m)^\s*"version"\s*:\s*"' + [regex]::Escape($nextVersion) + '"\s*,?\s*$'
+    if ($packageJsonText -notmatch $pkgVersionPattern) {
+        throw "package.json version mismatch. expected=$nextVersion"
     }
-    if ($pkgLock.version -ne $nextVersion) {
-        throw "package-lock.json version mismatch. expected=$nextVersion actual=$($pkgLock.version)"
+
+    $lockTopVersionMatch = [regex]::Match($packageLockText, '(?ms)^\s*\{\s*"name"\s*:\s*"[^"]*"\s*,\s*"version"\s*:\s*"([^"]+)"')
+    if (-not $lockTopVersionMatch.Success) {
+        throw "package-lock.json top-level version field not found."
     }
-    if ($pkgLock.packages.''.version -ne $nextVersion) {
-        throw "package-lock.json root package version mismatch. expected=$nextVersion actual=$($pkgLock.packages.''.version)"
+    if ($lockTopVersionMatch.Groups[1].Value -ne $nextVersion) {
+        throw "package-lock.json version mismatch. expected=$nextVersion actual=$($lockTopVersionMatch.Groups[1].Value)"
+    }
+
+    $lockRootPkgMatch = [regex]::Match(
+        $packageLockText,
+        '(?ms)"packages"\s*:\s*\{\s*""\s*:\s*\{[^{}]*?"version"\s*:\s*"([^"]+)"'
+    )
+    if (-not $lockRootPkgMatch.Success) {
+        throw "package-lock.json packages.\"\".version field not found."
+    }
+    if ($lockRootPkgMatch.Groups[1].Value -ne $nextVersion) {
+        throw "package-lock.json root package version mismatch. expected=$nextVersion actual=$($lockRootPkgMatch.Groups[1].Value)"
     }
     $versionNamePattern = '(?m)^\s*versionName\s+"' + [regex]::Escape($nextVersion) + '"\s*$'
     if ($gradleVerify -notmatch $versionNamePattern) {
