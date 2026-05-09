@@ -19,13 +19,18 @@ Use this skill to standardize commit, push, and tagging operations for this proj
 
 1. Read `references/release-rules.md`.
 2. Check repository state with `git status --short --branch`.
-3. Build a commit message that strictly follows `.gitmessage`.
-4. Save commit message into a UTF-8 message file.
-5. Run `scripts/commit-local-with-check.ps1 -MessageFile <path>` to stage, commit, and verify message encoding.
-6. Compute the next tag with `scripts/next-release-tag.ps1`.
-7. Execute remote operations through `scripts/git-auth.ps1`:
+3. Fetch remote tags: `scripts/git-auth.ps1 fetch origin --tags`.
+4. Prepare next release version **before commit**:
+   - Run `scripts/prepare-next-version.ps1`.
+   - Optional pre-check: `scripts/prepare-next-version.ps1 -DryRun`.
+   - This script computes the next tag, updates `package.json`, `package-lock.json`, and `android/app/build.gradle`, bumps `versionCode`, removes BOM risk, and checks for invalid characters.
+5. Build a commit message that strictly follows `.gitmessage`.
+6. Save commit message into a UTF-8 (no BOM) message file.
+7. Run `scripts/commit-local-with-check.ps1 -MessageFile <path>` to stage, commit, and verify message encoding plus staged text-file sanity checks.
+8. Execute remote operations through `scripts/git-auth.ps1`:
    - Branch push: `scripts/git-auth.ps1 push origin main`
    - Tag push: `scripts/git-auth.ps1 push origin <tag>`
+9. Create an annotated tag message using ASCII-only text when possible to minimize encoding risks in release tooling.
 
 ## Commit Message Rules
 
@@ -39,6 +44,7 @@ Use this skill to standardize commit, push, and tagging operations for this proj
 - Keep tag format strictly `vx.0.y`.
 - Keep `x` equal to the current major from the highest existing `v*.0.*` tag.
 - Set `y` to the previous maximum plus one.
+- Sync version files to `${x}.0.${y}` **before commit**.
 - Create an annotated tag with a short bilingual message.
 
 ## Security Rules
@@ -47,3 +53,4 @@ Use this skill to standardize commit, push, and tagging operations for this proj
 - Never store PAT in tracked files, commit messages, tag messages, or script defaults.
 - Use `scripts/git-auth.ps1` for remote operations to inject PAT only at runtime.
 - Avoid printing full credential-bearing URLs in terminal output.
+- Avoid introducing invalid text bytes (UTF-8 BOM, U+FFFD, control chars) in committed text files.
