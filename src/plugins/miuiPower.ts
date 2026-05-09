@@ -42,6 +42,19 @@ export interface OpenAppCommandResult {
   url?: string;
 }
 
+export type LaunchIntentExtraValue = string | number | boolean;
+
+export interface LaunchIntentOptions {
+  action?: string;
+  packageName?: string;
+  className?: string;
+  dataUri?: string;
+  mimeType?: string;
+  categories?: string[];
+  extras?: Record<string, LaunchIntentExtraValue>;
+  chooser?: boolean;
+}
+
 export interface OverlayPermissionResult {
   granted: boolean;
 }
@@ -132,6 +145,8 @@ export interface MiuiPowerPlugin {
   takeVideo(): Promise<OpenAppCommandResult>;
   openDoubao(): Promise<OpenAppCommandResult>;
   shareToDoubao(options: { text: string }): Promise<OpenAppCommandResult>;
+  openPackage(options: { packageName: string }): Promise<OpenAppCommandResult>;
+  launchIntent(options: LaunchIntentOptions): Promise<OpenAppCommandResult>;
   hasOverlayPermission(): Promise<OverlayPermissionResult>;
   hasAccessibilityPermission(): Promise<AccessibilityPermissionResult>;
   openOverlayPermissionSettings(): Promise<FocusOverlayResult>;

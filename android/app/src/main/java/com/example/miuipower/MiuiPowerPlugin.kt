@@ -10,6 +10,7 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
@@ -628,6 +629,98 @@ class MiuiPowerPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun openPackage(call: PluginCall) {
+        val packageName = call.getString("packageName")?.trim()
+        if (packageName.isNullOrEmpty()) {
+            call.resolve(result(false, "invalid_args").apply {
+                put("error", "packageName is required")
+            })
+            return
+        }
+        call.resolve(openPackage(packageName))
+    }
+
+    @PluginMethod
+    fun launchIntent(call: PluginCall) {
+        val action = call.getString("action")?.trim()?.takeIf { it.isNotEmpty() }
+        val packageName = call.getString("packageName")?.trim()?.takeIf { it.isNotEmpty() }
+        val className = call.getString("className")?.trim()?.takeIf { it.isNotEmpty() }
+        val dataUri = call.getString("dataUri")?.trim()?.takeIf { it.isNotEmpty() }
+        val mimeType = call.getString("mimeType")?.trim()?.takeIf { it.isNotEmpty() }
+        val categories = call.getArray("categories")
+        val extras = call.getObject("extras")
+        val chooser = call.getBoolean("chooser") ?: false
+
+        if (className != null && packageName == null) {
+            call.resolve(result(false, "invalid_args").apply {
+                put("error", "className requires packageName")
+            })
+            return
+        }
+
+        if (action == null && packageName == null && className == null && dataUri == null) {
+            call.resolve(result(false, "invalid_args").apply {
+                put("error", "At least one of action/packageName/className/dataUri is required")
+            })
+            return
+        }
+
+        try {
+            val intent = if (action != null) Intent(action) else Intent()
+
+            if (dataUri != null && mimeType != null) {
+                intent.setDataAndType(Uri.parse(dataUri), mimeType)
+            } else if (dataUri != null) {
+                intent.data = Uri.parse(dataUri)
+            } else if (mimeType != null) {
+                intent.type = mimeType
+            }
+
+            if (packageName != null && className != null) {
+                intent.component = ComponentName(packageName, className)
+            } else if (packageName != null) {
+                intent.setPackage(packageName)
+            }
+
+            applyCategories(intent, categories)
+            applyExtras(intent, extras)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+            val launchIntent = if (chooser) {
+                Intent.createChooser(intent, null).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            } else {
+                intent
+            }
+
+            context.startActivity(launchIntent)
+            call.resolve(result(true, "custom_intent").apply {
+                if (packageName != null) {
+                    put("packageName", packageName)
+                    put("installed", isPackageInstalled(packageName))
+                }
+                if (dataUri != null) {
+                    put("url", dataUri)
+                }
+            })
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "Custom intent launch failed: action=$action pkg=$packageName cls=$className uri=$dataUri",
+                e,
+            )
+            call.resolve(result(false, "none").apply {
+                if (packageName != null) {
+                    put("packageName", packageName)
+                    put("installed", isPackageInstalled(packageName))
+                }
+                put("error", e.message ?: "launch_failed")
+            })
+        }
+    }
+
+    @PluginMethod
     fun hasOverlayPermission(call: PluginCall) {
         call.resolve(JSObject().apply {
             put("granted", canDrawOverlays(context))
@@ -1015,6 +1108,50 @@ class MiuiPowerPlugin : Plugin() {
             true
         } catch (e: Exception) {
             Log.w(TAG, "Intent launch failed: action=$action pkg=$packageName uri=$uri", e)
+            false
+        }
+    }
+
+    private fun applyCategories(intent: Intent, categories: JSArray?) {
+        if (categories == null) {
+            return
+        }
+        for (index in 0 until categories.length()) {
+            val value = categories.optString(index, "").trim()
+            if (value.isNotEmpty()) {
+                intent.addCategory(value)
+            }
+        }
+    }
+
+    private fun applyExtras(intent: Intent, extras: JSObject?) {
+        if (extras == null) {
+            return
+        }
+
+        val keys = extras.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val value = extras.opt(key)
+            when (value) {
+                is Boolean -> intent.putExtra(key, value)
+                is Int -> intent.putExtra(key, value)
+                is Long -> intent.putExtra(key, value)
+                is Double -> intent.putExtra(key, value)
+                is Float -> intent.putExtra(key, value)
+                is Number -> intent.putExtra(key, value.toDouble())
+                is String -> intent.putExtra(key, value)
+                null -> Unit
+                else -> intent.putExtra(key, value.toString())
+            }
+        }
+    }
+
+    private fun isPackageInstalled(packageName: String): Boolean {
+        return try {
+            context.packageManager.getPackageInfo(packageName, 0)
+            true
+        } catch (_: Exception) {
             false
         }
     }
