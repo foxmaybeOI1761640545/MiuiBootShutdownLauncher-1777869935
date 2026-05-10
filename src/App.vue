@@ -1,5 +1,5 @@
 <template>
-  <main class="page">
+  <main class="page" :class="themeClass">
     <section class="launcher-shell">
       <section class="zone1-fixed">
         <header class="app-header">
@@ -29,10 +29,11 @@
 
       <section
         class="content-viewport"
-        @touchstart.passive="onContentTouchStart"
-        @touchmove.passive="onContentTouchMove"
-        @touchend.passive="onContentTouchEnd"
-        @touchcancel.passive="onContentTouchCancel"
+        @touchstart.capture.passive="onContentTouchStart"
+        @touchmove.capture.passive="onContentTouchMove"
+        @touchend.capture.passive="onContentTouchEnd"
+        @touchcancel.capture.passive="onContentTouchCancel"
+        @click.capture="onContentClickCapture"
       >
         <article
           ref="pageScrollRef"
@@ -134,10 +135,18 @@
                             <option value="settings">Settings</option>
                           </select>
                         </label>
+                        <label>
+                          Theme
+                          <select v-model="themeMode">
+                            <option value="light">Light</option>
+                            <option value="dark">Dark</option>
+                          </select>
+                        </label>
                       </div>
                       <p class="settings-help">
                         Startup policy is saved manually. Last active page and collapsed state are auto-saved.
                       </p>
+                      <p class="settings-help">Theme mode is runtime-only and is not persisted.</p>
                     </template>
 
                     <template v-else-if="group.id === 'settings-actions'">
@@ -452,6 +461,7 @@ import page3Icon from "./assets/nav-page-3.svg";
 type RuntimePageId = LauncherRuntimePageId;
 type ActionVariant = "pink" | "beige";
 type CellSpan = "half" | "full";
+type ThemeMode = "light" | "dark";
 
 interface ActionItem {
   key: string;
@@ -533,9 +543,21 @@ interface SettingsGroupDefinition {
   collapsedByDefault: boolean;
 }
 
+const NO_SWIPE_SELECTOR =
+  'input, textarea, select, option, [contenteditable="true"], .no-swipe, [data-no-swipe="true"], [data-scroll-lock="true"], [data-drag-handle="true"]';
+
+function resolveInitialThemeMode(): ThemeMode {
+  if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return "light";
+}
+
 const activePage = ref<RuntimePageId>("page1");
 const pageScrollRef = ref<HTMLElement | null>(null);
 const isSwitchingPage = ref(false);
+const themeMode = ref<ThemeMode>(resolveInitialThemeMode());
+const themeClass = computed(() => (themeMode.value === "dark" ? "theme-dark" : "theme-light"));
 const uiState = ref<LauncherUiState>(loadLauncherUiState(buildDefaultLauncherUiState()));
 const searchKeyword = ref("");
 const pageScrollTopByPage = ref<Record<RuntimePageId, number>>({
@@ -549,6 +571,7 @@ let touchStartTime = 0;
 let touchIdentifier: number | null = null;
 let swipeLocked = false;
 let swipeAxis: "horizontal" | "vertical" | null = null;
+let swipeSuppressClickUntil = 0;
 
 const loadingAction = ref("");
 const message = ref("");
@@ -1386,7 +1409,20 @@ function shouldIgnoreSwipe(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
   }
-  return Boolean(target.closest('input, textarea, select, button, label, .no-swipe, [data-no-swipe="true"]'));
+  return Boolean(target.closest(NO_SWIPE_SELECTOR));
+}
+
+function shouldSuppressClickAfterSwipe() {
+  return Date.now() < swipeSuppressClickUntil;
+}
+
+function onContentClickCapture(event: MouseEvent) {
+  if (!shouldSuppressClickAfterSwipe()) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation?.();
 }
 
 function findTrackedTouch(touchList: TouchList) {
@@ -1440,13 +1476,11 @@ function onContentTouchMove(event: TouchEvent) {
 
   const deltaX = touch.clientX - touchStartX;
   const deltaY = touch.clientY - touchStartY;
-  const totalDistance = Math.hypot(deltaX, deltaY);
-  if (totalDistance < 8) {
-    return;
-  }
-
   const absX = Math.abs(deltaX);
   const absY = Math.abs(deltaY);
+  if (absX < 8 && absY < 8) {
+    return;
+  }
   if (absY > absX) {
     swipeAxis = "vertical";
     swipeLocked = true;
@@ -1459,10 +1493,6 @@ function onContentTouchMove(event: TouchEvent) {
 
 async function onContentTouchEnd(event: TouchEvent) {
   try {
-    if (event.changedTouches.length !== 1 || event.touches.length !== 0) {
-      swipeLocked = true;
-      return;
-    }
     if (swipeLocked || swipeAxis !== "horizontal" || touchIdentifier === null || isSwitchingPage.value) {
       return;
     }
@@ -1482,21 +1512,22 @@ async function onContentTouchEnd(event: TouchEvent) {
       return;
     }
 
-    if (deltaX < 0) {
-      await switchPage(getNextPage(activePage.value));
-      return;
-    }
-    await switchPage(getPrevPage(activePage.value));
+    swipeSuppressClickUntil = Date.now() + 250;
+    const targetPage = deltaX < 0 ? getNextPage(activePage.value) : getPrevPage(activePage.value);
+    await switchPage(targetPage);
   } finally {
     resetTouchState();
   }
 }
 
 function onContentTouchCancel(event: TouchEvent) {
-  if (event.touches.length > 1 || event.changedTouches.length > 1) {
-    swipeLocked = true;
+  try {
+    if (event.touches.length > 1 || event.changedTouches.length > 1) {
+      swipeLocked = true;
+    }
+  } finally {
+    resetTouchState();
   }
-  resetTouchState();
 }
 
 function capturePageScroll(pageId: RuntimePageId) {
@@ -1770,7 +1801,7 @@ const searchSettingItems: SearchResultItem[] = [
     locateKey: "settings-startup",
     label: "Startup Policy",
     hint: "Settings",
-    keywords: ["startup", "policy", "remember", "fixed", "page"],
+    keywords: ["startup", "policy", "remember", "fixed", "page", "theme", "light", "dark"],
     groupId: "settings-startup",
     groupScope: "settings",
   },
