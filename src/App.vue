@@ -27,7 +27,13 @@
         </article>
       </section>
 
-      <section class="content-viewport">
+      <section
+        class="content-viewport"
+        @touchstart.passive="onContentTouchStart"
+        @touchmove.passive="onContentTouchMove"
+        @touchend.passive="onContentTouchEnd"
+        @touchcancel.passive="onContentTouchCancel"
+      >
         <article
           ref="pageScrollRef"
           class="zone2-panel page-scroll"
@@ -529,6 +535,7 @@ interface SettingsGroupDefinition {
 
 const activePage = ref<RuntimePageId>("page1");
 const pageScrollRef = ref<HTMLElement | null>(null);
+const isSwitchingPage = ref(false);
 const uiState = ref<LauncherUiState>(loadLauncherUiState(buildDefaultLauncherUiState()));
 const searchKeyword = ref("");
 const pageScrollTopByPage = ref<Record<RuntimePageId, number>>({
@@ -536,6 +543,12 @@ const pageScrollTopByPage = ref<Record<RuntimePageId, number>>({
   page2: 0,
   settings: 0,
 });
+let touchStartX = 0;
+let touchStartY = 0;
+let touchStartTime = 0;
+let touchIdentifier: number | null = null;
+let swipeLocked = false;
+let swipeAxis: "horizontal" | "vertical" | null = null;
 
 const loadingAction = ref("");
 const message = ref("");
@@ -1215,6 +1228,7 @@ const settingsGroups: SettingsGroupDefinition[] = [
   { id: "settings-groups", title: "分组管理", locateKey: "settings-groups", collapsedByDefault: true },
   { id: "settings-custom", title: "自定义按钮", locateKey: "settings-custom", collapsedByDefault: true },
 ];
+const pageOrder: RuntimePageId[] = ["page1", "page2", "settings"];
 
 function resolveStartupPage(config: LauncherConfigV3, state: LauncherUiState): RuntimePageId {
   return config.startupPolicy.mode === "remember" ? state.lastActivePage : config.startupPolicy.fixedPageId;
@@ -1343,6 +1357,148 @@ function isSettingsGroupId(value: string): value is SettingsGroupDefinition["id"
   return settingsGroups.some((group) => group.id === value);
 }
 
+function resetTouchState() {
+  touchStartX = 0;
+  touchStartY = 0;
+  touchStartTime = 0;
+  touchIdentifier = null;
+  swipeLocked = false;
+  swipeAxis = null;
+}
+
+function getNextPage(pageId: RuntimePageId): RuntimePageId {
+  const index = pageOrder.indexOf(pageId);
+  if (index < 0) {
+    return pageOrder[0];
+  }
+  return pageOrder[(index + 1) % pageOrder.length];
+}
+
+function getPrevPage(pageId: RuntimePageId): RuntimePageId {
+  const index = pageOrder.indexOf(pageId);
+  if (index < 0) {
+    return pageOrder[0];
+  }
+  return pageOrder[(index - 1 + pageOrder.length) % pageOrder.length];
+}
+
+function shouldIgnoreSwipe(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(target.closest('input, textarea, select, button, label, .no-swipe, [data-no-swipe="true"]'));
+}
+
+function findTrackedTouch(touchList: TouchList) {
+  if (touchIdentifier === null) {
+    return null;
+  }
+  for (let index = 0; index < touchList.length; index += 1) {
+    const touch = touchList.item(index);
+    if (touch && touch.identifier === touchIdentifier) {
+      return touch;
+    }
+  }
+  return null;
+}
+
+function onContentTouchStart(event: TouchEvent) {
+  resetTouchState();
+  if (isSwitchingPage.value) {
+    swipeLocked = true;
+    return;
+  }
+  if (event.touches.length !== 1) {
+    swipeLocked = true;
+    return;
+  }
+  if (shouldIgnoreSwipe(event.target)) {
+    swipeLocked = true;
+    return;
+  }
+
+  const touch = event.touches[0];
+  touchStartX = touch.clientX;
+  touchStartY = touch.clientY;
+  touchStartTime = Date.now();
+  touchIdentifier = touch.identifier;
+}
+
+function onContentTouchMove(event: TouchEvent) {
+  if (swipeLocked) {
+    return;
+  }
+  if (event.touches.length !== 1) {
+    swipeLocked = true;
+    return;
+  }
+  const touch = findTrackedTouch(event.touches);
+  if (!touch) {
+    swipeLocked = true;
+    return;
+  }
+
+  const deltaX = touch.clientX - touchStartX;
+  const deltaY = touch.clientY - touchStartY;
+  const totalDistance = Math.hypot(deltaX, deltaY);
+  if (totalDistance < 8) {
+    return;
+  }
+
+  const absX = Math.abs(deltaX);
+  const absY = Math.abs(deltaY);
+  if (absY > absX) {
+    swipeAxis = "vertical";
+    swipeLocked = true;
+    return;
+  }
+  if (absX > absY * 1.5) {
+    swipeAxis = "horizontal";
+  }
+}
+
+async function onContentTouchEnd(event: TouchEvent) {
+  try {
+    if (event.changedTouches.length !== 1 || event.touches.length !== 0) {
+      swipeLocked = true;
+      return;
+    }
+    if (swipeLocked || swipeAxis !== "horizontal" || touchIdentifier === null || isSwitchingPage.value) {
+      return;
+    }
+
+    const touch = findTrackedTouch(event.changedTouches);
+    if (!touch) {
+      return;
+    }
+
+    const deltaX = touch.clientX - touchStartX;
+    const deltaY = touch.clientY - touchStartY;
+    const duration = Date.now() - touchStartTime;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+    const isHorizontalSwipe = absX > 50 && absX > absY * 1.5 && duration < 600;
+    if (!isHorizontalSwipe) {
+      return;
+    }
+
+    if (deltaX < 0) {
+      await switchPage(getNextPage(activePage.value));
+      return;
+    }
+    await switchPage(getPrevPage(activePage.value));
+  } finally {
+    resetTouchState();
+  }
+}
+
+function onContentTouchCancel(event: TouchEvent) {
+  if (event.touches.length > 1 || event.changedTouches.length > 1) {
+    swipeLocked = true;
+  }
+  resetTouchState();
+}
+
 function capturePageScroll(pageId: RuntimePageId) {
   const container = pageScrollRef.value;
   if (!container) {
@@ -1368,13 +1524,18 @@ function onPageScroll() {
 }
 
 async function switchPage(pageId: RuntimePageId) {
-  if (pageId === activePage.value) {
+  if (pageId === activePage.value || isSwitchingPage.value) {
     return;
   }
-  capturePageScroll(activePage.value);
-  activePage.value = pageId;
-  await nextTick();
-  restorePageScroll(pageId);
+  isSwitchingPage.value = true;
+  try {
+    capturePageScroll(activePage.value);
+    activePage.value = pageId;
+    await nextTick();
+    restorePageScroll(pageId);
+  } finally {
+    isSwitchingPage.value = false;
+  }
 }
 
 onBeforeUnmount(() => {
