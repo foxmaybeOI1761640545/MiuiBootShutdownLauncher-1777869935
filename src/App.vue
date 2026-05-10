@@ -27,80 +27,63 @@
         </article>
       </section>
 
-      <section
-        ref="swipeStageRef"
-        class="swipe-stage"
-        @touchstart.passive="onSwipeTouchStart"
-        @touchmove="onSwipeTouchMove"
-        @touchend="onSwipeTouchEnd"
-        @touchcancel="onSwipeTouchCancel"
-      >
-        <div
-          class="page-track"
-          :class="{ 'is-animating': isTrackAnimating, 'is-dragging': isSwipeDragging }"
-          :style="trackStyle"
-          @transitionend="onTrackTransitionEnd"
+      <section class="content-viewport">
+        <article
+          ref="pageScrollRef"
+          class="zone2-panel page-scroll"
+          :data-page-id="activePage"
+          @scroll.passive="onPageScroll"
         >
-          <section
-            v-for="(pageId, trackIndex) in trackPages"
-            :key="`${pageId}-${trackIndex}`"
-            class="track-page"
-          >
-            <article
-              class="zone2-panel page-scroll"
-              :data-page-id="pageId"
-              :ref="(el) => setPageContainerRef(pageId, trackIndex, el as HTMLElement | null)"
-            >
-              <template v-if="pageId !== 'settings'">
-                <div v-if="runtimeGroupsForPage(pageId).length === 0" class="search-empty">
+          <template v-if="activePage !== 'settings'">
+            <div v-if="runtimeGroupsForPage(activePage).length === 0" class="search-empty">
                   No group available.
-                </div>
-                <section
-                  v-for="group in runtimeGroupsForPage(pageId)"
-                  :key="group.id"
-                  class="zone2-group"
-                  :data-locate="`group-${pageId}-${group.id}`"
-                  :class="highlightClass(`group-${pageId}-${group.id}`)"
+            </div>
+            <section
+              v-for="group in runtimeGroupsForPage(activePage)"
+              :key="group.id"
+              class="zone2-group"
+              :data-locate="`group-${activePage}-${group.id}`"
+              :class="highlightClass(`group-${activePage}-${group.id}`)"
+            >
+              <button type="button" class="group-header" @click="toggleRuntimeGroup(activePage, group.id)">
+                <span>{{ group.title }}</span>
+                <span>{{ isRuntimeGroupCollapsed(activePage, group.id) ? "Expand" : "Collapse" }}</span>
+              </button>
+              <div v-if="!isRuntimeGroupCollapsed(activePage, group.id)" class="extra-grid">
+                <button
+                  v-for="entry in zone2EntriesByGroup(activePage, group.id)"
+                  :key="entry.id"
+                  type="button"
+                  class="action-btn action-btn--compact"
+                  :class="[
+                    spanClass(entry.size === 'large' ? 'full' : 'half'),
+                    variantClass(entry.variant),
+                    highlightClass(entry.locateKey),
+                    { 'is-disabled': entry.disabled },
+                  ]"
+                  :data-locate="entry.locateKey"
+                  :disabled="isLoading || entry.disabled"
+                  @click="runZone2Entry(entry)"
                 >
-                  <button type="button" class="group-header" @click="toggleRuntimeGroup(pageId, group.id)">
-                    <span>{{ group.title }}</span>
-                    <span>{{ isRuntimeGroupCollapsed(pageId, group.id) ? "Expand" : "Collapse" }}</span>
-                  </button>
-                  <div v-if="!isRuntimeGroupCollapsed(pageId, group.id)" class="extra-grid">
-                    <button
-                      v-for="entry in zone2EntriesByGroup(pageId, group.id)"
-                      :key="entry.id"
-                      type="button"
-                      class="action-btn action-btn--compact"
-                      :class="[
-                        spanClass(entry.size === 'large' ? 'full' : 'half'),
-                        variantClass(entry.variant),
-                        highlightClass(entry.locateKey),
-                        { 'is-disabled': entry.disabled },
-                      ]"
-                      :data-locate="entry.locateKey"
-                      :disabled="isLoading || entry.disabled"
-                      @click="runZone2Entry(entry)"
-                    >
-                      {{ zone2EntryLabel(entry) }}
-                    </button>
-                  </div>
-                </section>
-              </template>
+                  {{ zone2EntryLabel(entry) }}
+                </button>
+              </div>
+            </section>
+          </template>
 
-              <template v-else>
-                <section
-                  v-for="group in settingsGroups"
-                  :key="group.id"
-                  class="zone2-group settings-group"
-                  :data-locate="group.locateKey"
-                  :class="highlightClass(group.locateKey)"
-                >
-                  <button type="button" class="group-header" @click="toggleSettingsGroup(group.id)">
-                    <span>{{ group.title }}</span>
-                    <span>{{ isSettingsGroupCollapsed(group.id) ? "Expand" : "Collapse" }}</span>
-                  </button>
-                  <div v-if="!isSettingsGroupCollapsed(group.id)" class="settings-group-content">
+          <template v-else>
+            <section
+              v-for="group in settingsGroups"
+              :key="group.id"
+              class="zone2-group settings-group"
+              :data-locate="group.locateKey"
+              :class="highlightClass(group.locateKey)"
+            >
+              <button type="button" class="group-header" @click="toggleSettingsGroup(group.id)">
+                <span>{{ group.title }}</span>
+                <span>{{ isSettingsGroupCollapsed(group.id) ? "Expand" : "Collapse" }}</span>
+              </button>
+              <div v-if="!isSettingsGroupCollapsed(group.id)" class="settings-group-content">
                     <template v-if="group.id === 'settings-save'">
                       <p class="settings-help">
                         Only config-driven content is editable. Save applies changes, revert restores last saved state.
@@ -402,8 +385,6 @@
               </template>
             </article>
           </section>
-        </div>
-      </section>
 
       <section class="bottom-fixed">
         <section class="status-panel" aria-live="polite">
@@ -431,7 +412,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import {
   type LaunchIntentOptions,
   type OpenAppCommandResult,
@@ -546,34 +527,18 @@ interface SettingsGroupDefinition {
   collapsedByDefault: boolean;
 }
 
-interface SwipeSession {
-  active: boolean;
-  startedOnInteractive: boolean;
-  startX: number;
-  startY: number;
-  isHorizontal: boolean;
-}
-
 const activePage = ref<RuntimePageId>("page1");
-const swipeStageRef = ref<HTMLElement | null>(null);
-const pageContainerRefs = new Map<RuntimePageId, HTMLElement>();
+const pageScrollRef = ref<HTMLElement | null>(null);
 const uiState = ref<LauncherUiState>(loadLauncherUiState(buildDefaultLauncherUiState()));
 const searchKeyword = ref("");
+const pageScrollTopByPage = ref<Record<RuntimePageId, number>>({
+  page1: 0,
+  page2: 0,
+  settings: 0,
+});
 
 const loadingAction = ref("");
 const message = ref("");
-const stageWidth = ref(1);
-const virtualTrackIndex = ref(1);
-const dragOffset = ref(0);
-const isTrackAnimating = ref(false);
-const isSwipeDragging = ref(false);
-const swipeSession = reactive<SwipeSession>({
-  active: false,
-  startedOnInteractive: false,
-  startX: 0,
-  startY: 0,
-  isHorizontal: false,
-});
 
 const isLoading = computed(() => loadingAction.value !== "");
 const displayMessage = computed(() => message.value || "Waiting for action. Tap any entry button.");
@@ -1243,9 +1208,6 @@ const editableBuiltinOptions = computed(() =>
 const collapsedGroupMap = ref<Record<string, boolean>>({});
 const highlightedLocateKey = ref("");
 let highlightTimer: number | null = null;
-let stageResizeObserver: ResizeObserver | null = null;
-
-const pageOrder: RuntimePageId[] = ["page1", "page2", "settings"];
 const settingsGroups: SettingsGroupDefinition[] = [
   { id: "settings-save", title: "保存与撤销", locateKey: "settings-save", collapsedByDefault: false },
   { id: "settings-startup", title: "启动页策略", locateKey: "settings-startup", collapsedByDefault: false },
@@ -1253,35 +1215,6 @@ const settingsGroups: SettingsGroupDefinition[] = [
   { id: "settings-groups", title: "分组管理", locateKey: "settings-groups", collapsedByDefault: true },
   { id: "settings-custom", title: "自定义按钮", locateKey: "settings-custom", collapsedByDefault: true },
 ];
-
-const trackIndexByPage: Record<RuntimePageId, number> = {
-  page1: 1,
-  page2: 2,
-  settings: 3,
-};
-
-const trackPages = computed<RuntimePageId[]>(() => [
-  pageOrder[pageOrder.length - 1],
-  ...pageOrder,
-  pageOrder[0],
-]);
-
-const trackStyle = computed(() => ({
-  transform: `translate3d(${-(virtualTrackIndex.value * stageWidth.value) + dragOffset.value}px, 0, 0)`,
-  transition: isTrackAnimating.value ? "transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1)" : "none",
-}));
-
-function pageIndex(pageId: RuntimePageId) {
-  return pageOrder.indexOf(pageId);
-}
-
-function nextPageId(pageId: RuntimePageId): RuntimePageId {
-  return pageOrder[(pageIndex(pageId) + 1) % pageOrder.length];
-}
-
-function previousPageId(pageId: RuntimePageId): RuntimePageId {
-  return pageOrder[(pageIndex(pageId) + pageOrder.length - 1) % pageOrder.length];
-}
 
 function resolveStartupPage(config: LauncherConfigV3, state: LauncherUiState): RuntimePageId {
   return config.startupPolicy.mode === "remember" ? state.lastActivePage : config.startupPolicy.fixedPageId;
@@ -1296,7 +1229,6 @@ function settingsGroupStateKey(groupId: string) {
 }
 
 activePage.value = resolveStartupPage(savedConfig.value, uiState.value);
-virtualTrackIndex.value = trackIndexByPage[activePage.value];
 collapsedGroupMap.value = { ...uiState.value.collapsedGroups };
 
 function persistUiState() {
@@ -1411,161 +1343,41 @@ function isSettingsGroupId(value: string): value is SettingsGroupDefinition["id"
   return settingsGroups.some((group) => group.id === value);
 }
 
-function switchPage(pageId: RuntimePageId) {
-  if (pageId === activePage.value || isTrackAnimating.value) {
+function capturePageScroll(pageId: RuntimePageId) {
+  const container = pageScrollRef.value;
+  if (!container) {
     return;
   }
-  const direction: 1 | -1 = pageId === nextPageId(activePage.value) ? 1 : -1;
+  pageScrollTopByPage.value[pageId] = container.scrollTop;
+}
+
+function restorePageScroll(pageId: RuntimePageId) {
+  const container = pageScrollRef.value;
+  if (!container) {
+    return;
+  }
+  container.scrollTop = pageScrollTopByPage.value[pageId] ?? 0;
+}
+
+function onPageScroll() {
+  const container = pageScrollRef.value;
+  if (!container) {
+    return;
+  }
+  pageScrollTopByPage.value[activePage.value] = container.scrollTop;
+}
+
+async function switchPage(pageId: RuntimePageId) {
+  if (pageId === activePage.value) {
+    return;
+  }
+  capturePageScroll(activePage.value);
   activePage.value = pageId;
-  dragOffset.value = 0;
-  isSwipeDragging.value = false;
-  isTrackAnimating.value = true;
-  virtualTrackIndex.value += direction;
+  await nextTick();
+  restorePageScroll(pageId);
 }
-
-function setPageContainerRef(pageId: RuntimePageId, trackIndex: number, element: HTMLElement | null) {
-  if (trackIndex !== trackIndexByPage[pageId]) {
-    return;
-  }
-  if (!element) {
-    pageContainerRefs.delete(pageId);
-    return;
-  }
-  pageContainerRefs.set(pageId, element);
-}
-
-function normalizeTrackIndexAfterLoop() {
-  const firstRealIndex = trackIndexByPage.page1;
-  const lastRealIndex = trackIndexByPage.settings;
-  if (virtualTrackIndex.value === 0) {
-    isTrackAnimating.value = false;
-    virtualTrackIndex.value = lastRealIndex;
-    return;
-  }
-  if (virtualTrackIndex.value === trackPages.value.length - 1) {
-    isTrackAnimating.value = false;
-    virtualTrackIndex.value = firstRealIndex;
-  }
-}
-
-function onTrackTransitionEnd() {
-  if (!isTrackAnimating.value) {
-    return;
-  }
-  isTrackAnimating.value = false;
-  normalizeTrackIndexAfterLoop();
-}
-
-function isInteractiveTouchTarget(target: EventTarget | null) {
-  const element = target as HTMLElement | null;
-  if (!element) {
-    return false;
-  }
-  return Boolean(element.closest("input, textarea, select, option, [contenteditable=''], [contenteditable='true']"));
-}
-
-function hasFocusedFormControl() {
-  const active = document.activeElement as HTMLElement | null;
-  if (!active) {
-    return false;
-  }
-  if (active.matches("input, textarea, select, [contenteditable=''], [contenteditable='true']")) {
-    return true;
-  }
-  return Boolean(active.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
-}
-
-function resetSwipeSession() {
-  swipeSession.active = false;
-  swipeSession.startedOnInteractive = false;
-  swipeSession.isHorizontal = false;
-  dragOffset.value = 0;
-  isSwipeDragging.value = false;
-}
-
-function onSwipeTouchStart(event: TouchEvent) {
-  if (event.touches.length !== 1 || isTrackAnimating.value) {
-    return;
-  }
-  const touch = event.touches[0];
-  swipeSession.active = true;
-  swipeSession.startedOnInteractive = isInteractiveTouchTarget(event.target) || hasFocusedFormControl();
-  swipeSession.startX = touch.clientX;
-  swipeSession.startY = touch.clientY;
-  swipeSession.isHorizontal = false;
-}
-
-function onSwipeTouchMove(event: TouchEvent) {
-  if (!swipeSession.active || swipeSession.startedOnInteractive || event.touches.length !== 1) {
-    return;
-  }
-  const touch = event.touches[0];
-  const deltaX = touch.clientX - swipeSession.startX;
-  const deltaY = touch.clientY - swipeSession.startY;
-
-  if (!swipeSession.isHorizontal) {
-    if (Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY)) {
-      swipeSession.isHorizontal = true;
-      isSwipeDragging.value = true;
-    } else if (Math.abs(deltaY) > 8 && Math.abs(deltaY) >= Math.abs(deltaX)) {
-      swipeSession.active = false;
-      return;
-    }
-  }
-
-  if (!swipeSession.isHorizontal) {
-    return;
-  }
-  event.preventDefault();
-  dragOffset.value = deltaX;
-}
-
-function onSwipeTouchEnd() {
-  if (!swipeSession.active || swipeSession.startedOnInteractive || !swipeSession.isHorizontal) {
-    resetSwipeSession();
-    return;
-  }
-  const threshold = Math.max(56, stageWidth.value * 0.18);
-  const drag = dragOffset.value;
-  resetSwipeSession();
-
-  if (Math.abs(drag) < threshold) {
-    isTrackAnimating.value = true;
-    return;
-  }
-
-  const direction: 1 | -1 = drag < 0 ? 1 : -1;
-  const target = direction === 1 ? nextPageId(activePage.value) : previousPageId(activePage.value);
-  activePage.value = target;
-  isTrackAnimating.value = true;
-  virtualTrackIndex.value += direction;
-}
-
-function onSwipeTouchCancel() {
-  resetSwipeSession();
-}
-
-function updateStageWidth() {
-  stageWidth.value = Math.max(1, swipeStageRef.value?.clientWidth ?? 1);
-}
-
-onMounted(() => {
-  updateStageWidth();
-  if (typeof ResizeObserver !== "undefined") {
-    stageResizeObserver = new ResizeObserver(() => {
-      updateStageWidth();
-    });
-    if (swipeStageRef.value) {
-      stageResizeObserver.observe(swipeStageRef.value);
-    }
-  }
-  window.addEventListener("resize", updateStageWidth);
-});
 
 onBeforeUnmount(() => {
-  window.removeEventListener("resize", updateStageWidth);
-  stageResizeObserver?.disconnect();
-  stageResizeObserver = null;
   if (highlightTimer !== null) {
     window.clearTimeout(highlightTimer);
     highlightTimer = null;
@@ -1863,12 +1675,12 @@ const searchResults = computed<SearchResultItem[]>(() => {
       item.keywords.some((term) => term.toLowerCase().includes(keyword)) ||
       item.label.toLowerCase().includes(keyword),
     )
-    .slice(0, 18);
+    .slice(0, 6);
 });
 
 async function locateFromSearch(item: SearchResultItem) {
   searchKeyword.value = "";
-  switchPage(item.pageId);
+  await switchPage(item.pageId);
   if (item.groupId && item.groupScope === "runtime" && (item.pageId === "page1" || item.pageId === "page2")) {
     setRuntimeGroupCollapsed(item.pageId, item.groupId, false);
   }
@@ -1876,7 +1688,8 @@ async function locateFromSearch(item: SearchResultItem) {
     setSettingsGroupCollapsed(item.groupId, false);
   }
   await nextTick();
-  locateInContainer(pageContainerRefs.get(item.pageId) ?? null, item.locateKey);
+  restorePageScroll(item.pageId);
+  locateInContainer(pageScrollRef.value, item.locateKey);
 }
 
 function groupsForPage(pageId: ZonePageId) {
