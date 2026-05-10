@@ -462,6 +462,7 @@ type RuntimePageId = LauncherRuntimePageId;
 type ActionVariant = "pink" | "beige";
 type CellSpan = "half" | "full";
 type ThemeMode = "light" | "dark";
+const THEME_MODE_STORAGE_KEY = "launcher.theme-mode.v1";
 
 interface ActionItem {
   key: string;
@@ -547,6 +548,12 @@ const NO_SWIPE_SELECTOR =
   'input, textarea, select, option, [contenteditable="true"], .no-swipe, [data-no-swipe="true"], [data-scroll-lock="true"], [data-drag-handle="true"]';
 
 function resolveInitialThemeMode(): ThemeMode {
+  if (typeof window !== "undefined") {
+    const storedValue = window.localStorage.getItem(THEME_MODE_STORAGE_KEY);
+    if (storedValue === "light" || storedValue === "dark") {
+      return storedValue;
+    }
+  }
   if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   }
@@ -1326,6 +1333,13 @@ watch(
   },
   { deep: true },
 );
+
+watch(themeMode, (mode) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(THEME_MODE_STORAGE_KEY, mode);
+});
 
 function toggleRuntimeGroup(pageId: RuntimePageId, groupId: string) {
   if (pageId === "settings") {
