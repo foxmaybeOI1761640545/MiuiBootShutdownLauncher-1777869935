@@ -33,6 +33,12 @@ export interface OpenHonorOfKingsResult {
   error?: string;
 }
 
+export interface DisplayRefreshRateResult {
+  currentRefreshRate: number;
+  roundedRefreshRate: number;
+  supportedRefreshRates: number[];
+}
+
 export interface OpenAppCommandResult {
   ok: boolean;
   method: string;
@@ -103,6 +109,8 @@ export interface MiuiPowerPlugin {
   openWirelessDebuggingPage(): Promise<OpenWirelessDebuggingResult>;
   openDeveloperOptions(): Promise<OpenDeveloperOptionsResult>;
   openScreenRefreshRatePage(): Promise<OpenScreenRefreshRateResult>;
+  openDisplaySettings(): Promise<OpenAppCommandResult>;
+  getDisplayRefreshRate(): Promise<DisplayRefreshRateResult>;
   openHonorOfKings(): Promise<OpenHonorOfKingsResult>;
   openScreenTimePage(): Promise<OpenAppCommandResult>;
   openUsageAccessSettings(): Promise<OpenAppCommandResult>;

@@ -4,11 +4,13 @@ import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Log
+import android.view.Display
 import androidx.core.content.ContextCompat
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
@@ -17,6 +19,7 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import kotlin.concurrent.thread
+import kotlin.math.roundToInt
 
 @CapacitorPlugin(name = "MiuiPower")
 class MiuiPowerPlugin : Plugin() {
@@ -31,6 +34,7 @@ class MiuiPowerPlugin : Plugin() {
         private const val ACTION_POWER_MANAGER = "miui.intent.action.POWER_MANAGER"
         private const val ACTION_MIUI_SCREEN_REFRESH_RATE = "miui.intent.action.DISPLAY_REFRESH_RATE"
         private const val ACTION_DISPLAY_SETTINGS = Settings.ACTION_DISPLAY_SETTINGS
+        private const val ACTION_SETTINGS = Settings.ACTION_SETTINGS
         private const val PKG_SETTINGS = "com.android.settings"
         private const val PKG_MISETTINGS = "com.xiaomi.misettings"
         private const val ACTIVITY_MISETTINGS_REFRESH_RATE =
@@ -168,6 +172,54 @@ class MiuiPowerPlugin : Plugin() {
         }
 
         call.resolve(result(false, "none"))
+    }
+
+    @PluginMethod
+    fun openDisplaySettings(call: PluginCall) {
+        if (tryOpenDisplaySettings(context)) {
+            call.resolve(result(true, "display_settings"))
+            return
+        }
+
+        if (tryOpenSystemSettings(context)) {
+            call.resolve(result(true, "settings"))
+            return
+        }
+
+        call.resolve(result(false, "none"))
+    }
+
+    @PluginMethod
+    fun getDisplayRefreshRate(call: PluginCall) {
+        try {
+            val display = resolveCurrentDisplay()
+            if (display == null) {
+                call.reject("Display is unavailable")
+                return
+            }
+
+            val currentRefreshRate = display.refreshRate.toDouble()
+            if (!currentRefreshRate.isFinite() || currentRefreshRate <= 0.0) {
+                call.reject("Invalid refresh rate")
+                return
+            }
+
+            val roundedRefreshRate = currentRefreshRate.roundToInt()
+            if (roundedRefreshRate <= 0) {
+                call.reject("Invalid rounded refresh rate")
+                return
+            }
+
+            val supportedRounded = collectSupportedRefreshRates(display)
+            call.resolve(JSObject().apply {
+                put("currentRefreshRate", currentRefreshRate)
+                put("roundedRefreshRate", roundedRefreshRate)
+                put("supportedRefreshRates", JSArray(supportedRounded))
+            })
+        } catch (e: Exception) {
+            Log.w(TAG, "Read display refresh rate failed", e)
+            call.reject(e.message ?: "Read refresh rate failed")
+        }
     }
 
     @PluginMethod
@@ -995,6 +1047,57 @@ class MiuiPowerPlugin : Plugin() {
             Log.w(TAG, "Display settings fallback launch failed", e)
             false
         }
+    }
+
+    private fun tryOpenSystemSettings(context: Context): Boolean {
+        return try {
+            val intent = Intent(ACTION_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "System settings fallback launch failed", e)
+            false
+        }
+    }
+
+    private fun resolveCurrentDisplay(): Display? {
+        val currentActivity = activity
+        if (currentActivity != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                currentActivity.display?.let { return it }
+            }
+            @Suppress("DEPRECATION")
+            currentActivity.windowManager?.defaultDisplay?.let { return it }
+        }
+
+        val manager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+        val displays = manager?.displays ?: emptyArray()
+        if (displays.isEmpty()) {
+            return null
+        }
+        return displays.firstOrNull { it.displayId == Display.DEFAULT_DISPLAY } ?: displays.firstOrNull()
+    }
+
+    private fun collectSupportedRefreshRates(display: Display): List<Int> {
+        val output = mutableSetOf<Int>()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            display.supportedModes.forEach { mode ->
+                val rounded = mode.refreshRate.roundToInt()
+                if (rounded > 0) {
+                    output.add(rounded)
+                }
+            }
+        }
+
+        val currentRounded = display.refreshRate.roundToInt()
+        if (currentRounded > 0) {
+            output.add(currentRounded)
+        }
+
+        return output.toList().sorted()
     }
 
     private fun tryOpenPackage(context: Context, packageName: String): Boolean {

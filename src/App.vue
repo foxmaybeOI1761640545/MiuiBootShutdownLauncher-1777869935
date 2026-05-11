@@ -41,44 +41,36 @@
           :data-page-id="activePage"
           @scroll.passive="onPageScroll"
         >
-          <template v-if="activePage !== 'settings'">
-            <div v-if="runtimeGroupsForPage(activePage).length === 0" class="search-empty">
-                  No group available.
-            </div>
-            <section
-              v-for="group in runtimeGroupsForPage(activePage)"
-              :key="group.id"
-              class="zone2-group"
-              :data-locate="`group-${activePage}-${group.id}`"
-              :class="highlightClass(`group-${activePage}-${group.id}`)"
-            >
-              <button type="button" class="group-header" @click="toggleRuntimeGroup(activePage, group.id)">
-                <span>{{ group.title }}</span>
-                <span>{{ isRuntimeGroupCollapsed(activePage, group.id) ? "Expand" : "Collapse" }}</span>
+          <template v-if="activePage === 'game'">
+            <section class="game-page" data-locate="game-page">
+              <article class="game-refresh-card" :class="[`state-${refreshStatus}`]">
+                <p class="game-refresh-label">当前屏幕刷新率</p>
+                <template v-if="refreshStatus === 'success'">
+                  <div class="game-refresh-main">
+                    <span class="game-refresh-value">{{ displayRoundedRefreshRate ?? "--" }}</span>
+                    <span class="game-refresh-unit">Hz</span>
+                  </div>
+                </template>
+                <template v-else-if="refreshStatus === 'loading'">
+                  <p class="game-refresh-state">检测中...</p>
+                </template>
+                <template v-else>
+                  <p class="game-refresh-state game-refresh-state-error">检测失败</p>
+                  <p v-if="refreshErrorText" class="game-refresh-error">{{ refreshErrorText }}</p>
+                </template>
+              </article>
+              <button
+                type="button"
+                class="action-btn action-btn--compact game-launch-btn"
+                :disabled="isLoading"
+                @click="launchHonorOfKingsFromGamePage"
+              >
+                启动王者荣耀
               </button>
-              <div v-if="!isRuntimeGroupCollapsed(activePage, group.id)" class="extra-grid">
-                <button
-                  v-for="entry in zone2EntriesByGroup(activePage, group.id)"
-                  :key="entry.id"
-                  type="button"
-                  class="action-btn action-btn--compact"
-                  :class="[
-                    spanClass(entry.size === 'large' ? 'full' : 'half'),
-                    variantClass(entry.variant),
-                    highlightClass(entry.locateKey),
-                    { 'is-disabled': entry.disabled },
-                  ]"
-                  :data-locate="entry.locateKey"
-                  :disabled="isLoading || entry.disabled"
-                  @click="runZone2Entry(entry)"
-                >
-                  {{ zone2EntryLabel(entry) }}
-                </button>
-              </div>
             </section>
           </template>
 
-          <template v-else>
+          <template v-else-if="activePage === 'settings'">
             <section
               v-for="group in settingsGroups"
               :key="group.id"
@@ -132,6 +124,7 @@
                           >
                             <option value="page1">Page 1</option>
                             <option value="page2">Page 2</option>
+                            <option value="game">Game</option>
                             <option value="settings">Settings</option>
                           </select>
                         </label>
@@ -398,6 +391,42 @@
                   </div>
                 </section>
               </template>
+              <template v-else>
+                <div v-if="runtimeGroupsForPage(activePage).length === 0" class="search-empty">
+                  No group available.
+                </div>
+                <section
+                  v-for="group in runtimeGroupsForPage(activePage)"
+                  :key="group.id"
+                  class="zone2-group"
+                  :data-locate="`group-${activePage}-${group.id}`"
+                  :class="highlightClass(`group-${activePage}-${group.id}`)"
+                >
+                  <button type="button" class="group-header" @click="toggleRuntimeGroup(activePage, group.id)">
+                    <span>{{ group.title }}</span>
+                    <span>{{ isRuntimeGroupCollapsed(activePage, group.id) ? "Expand" : "Collapse" }}</span>
+                  </button>
+                  <div v-if="!isRuntimeGroupCollapsed(activePage, group.id)" class="extra-grid">
+                    <button
+                      v-for="entry in zone2EntriesByGroup(activePage, group.id)"
+                      :key="entry.id"
+                      type="button"
+                      class="action-btn action-btn--compact"
+                      :class="[
+                        spanClass(entry.size === 'large' ? 'full' : 'half'),
+                        variantClass(entry.variant),
+                        highlightClass(entry.locateKey),
+                        { 'is-disabled': entry.disabled },
+                      ]"
+                      :data-locate="entry.locateKey"
+                      :disabled="isLoading || entry.disabled"
+                      @click="runZone2Entry(entry)"
+                    >
+                      {{ zone2EntryLabel(entry) }}
+                    </button>
+                  </div>
+                </section>
+              </template>
             </article>
           </section>
 
@@ -423,12 +452,31 @@
         </nav>
       </section>
     </section>
+
+    <section v-if="launchConfirm.visible" class="confirm-overlay" @click.self="closeLaunchConfirm">
+      <article class="confirm-panel" role="dialog" aria-modal="true" aria-label="Refresh Rate Confirm">
+        <h2>{{ launchConfirmTitle }}</h2>
+        <p>{{ launchConfirmMessage }}</p>
+        <div class="confirm-actions">
+          <button type="button" class="mini-btn" :disabled="isLoading" @click="handleAdjustRefreshRate">
+            调整刷新率
+          </button>
+          <button type="button" class="mini-btn" :disabled="isLoading" @click="handleContinueLaunch">
+            继续启动
+          </button>
+          <button type="button" class="mini-btn mini-btn-danger" :disabled="isLoading" @click="closeLaunchConfirm">
+            取消
+          </button>
+        </div>
+      </article>
+    </section>
   </main>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
+  type DisplayRefreshRateResult,
   type LaunchIntentOptions,
   type OpenAppCommandResult,
   type LaunchIntentExtraValue,
@@ -457,12 +505,17 @@ import {
 import page1Icon from "./assets/nav-page-1.svg";
 import page2Icon from "./assets/nav-page-2.svg";
 import page3Icon from "./assets/nav-page-3.svg";
+import gameIcon from "./assets/nav-game.svg";
 
 type RuntimePageId = LauncherRuntimePageId;
 type ActionVariant = "pink" | "beige";
 type CellSpan = "half" | "full";
 type ThemeMode = "light" | "dark";
+type RefreshStatus = "loading" | "success" | "error";
+type LaunchConfirmReason = "low_refresh_rate" | "detect_failed";
 const THEME_MODE_STORAGE_KEY = "launcher.theme-mode.v1";
+const HONOR_OF_KINGS_PACKAGE = "com.tencent.tmgp.sgame";
+const REFRESH_RATE_POLL_INTERVAL_MS = 100;
 
 interface ActionItem {
   key: string;
@@ -544,6 +597,24 @@ interface SettingsGroupDefinition {
   collapsedByDefault: boolean;
 }
 
+interface LaunchConfirmState {
+  visible: boolean;
+  reason: LaunchConfirmReason;
+  roundedRefreshRate: number | null;
+  errorText: string;
+}
+
+interface CapacitorAppListenerHandle {
+  remove: () => Promise<void> | void;
+}
+
+interface CapacitorAppPluginLike {
+  addListener: (
+    eventName: "pause" | "resume",
+    listenerFunc: () => void,
+  ) => Promise<CapacitorAppListenerHandle> | CapacitorAppListenerHandle;
+}
+
 const NO_SWIPE_SELECTOR =
   'input, textarea, select, option, [contenteditable="true"], .no-swipe, [data-no-swipe="true"], [data-scroll-lock="true"], [data-drag-handle="true"]';
 
@@ -570,6 +641,7 @@ const searchKeyword = ref("");
 const pageScrollTopByPage = ref<Record<RuntimePageId, number>>({
   page1: 0,
   page2: 0,
+  game: 0,
   settings: 0,
 });
 let touchStartX = 0;
@@ -582,9 +654,33 @@ let swipeSuppressClickUntil = 0;
 
 const loadingAction = ref("");
 const message = ref("");
+const refreshStatus = ref<RefreshStatus>("loading");
+const displayRoundedRefreshRate = ref<number | null>(null);
+const supportedRefreshRates = ref<number[]>([]);
+const refreshErrorText = ref("");
+const launchConfirm = reactive<LaunchConfirmState>({
+  visible: false,
+  reason: "low_refresh_rate",
+  roundedRefreshRate: null,
+  errorText: "",
+});
+let refreshRatePollTimer: number | null = null;
+let isReadingRefreshRate = false;
+let appPauseListenerHandle: CapacitorAppListenerHandle | null = null;
+let appResumeListenerHandle: CapacitorAppListenerHandle | null = null;
 
 const isLoading = computed(() => loadingAction.value !== "");
 const displayMessage = computed(() => message.value || "Waiting for action. Tap any entry button.");
+const launchConfirmTitle = computed(() =>
+  launchConfirm.reason === "low_refresh_rate" ? "当前为 60Hz，建议先调整刷新率" : "刷新率检测失败",
+);
+const launchConfirmMessage = computed(() => {
+  if (launchConfirm.reason === "low_refresh_rate") {
+    const value = launchConfirm.roundedRefreshRate ?? 60;
+    return `当前检测到 ${value}Hz，建议先调整屏幕刷新率后再启动。`;
+  }
+  return launchConfirm.errorText || "暂时无法读取当前屏幕刷新率。";
+});
 
 function spanClass(span: CellSpan) {
   return span === "full" ? "span-full" : "span-half";
@@ -632,6 +728,207 @@ async function runWithLoading(key: string, fallbackMessage: string, task: () => 
   } finally {
     loadingAction.value = "";
   }
+}
+
+function getCapacitorAppPlugin(): CapacitorAppPluginLike | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const appPlugin = (window as { Capacitor?: { Plugins?: { App?: unknown } } }).Capacitor?.Plugins?.App;
+  if (!appPlugin || typeof (appPlugin as { addListener?: unknown }).addListener !== "function") {
+    return null;
+  }
+  return appPlugin as CapacitorAppPluginLike;
+}
+
+function isDocumentVisible() {
+  return typeof document === "undefined" || document.visibilityState === "visible";
+}
+
+function shouldRunRefreshRatePolling() {
+  return activePage.value === "game" && isDocumentVisible();
+}
+
+function normalizeSupportedRefreshRates(values: number[]) {
+  const roundedValues = values
+    .map((item) => Math.round(Number(item)))
+    .filter((item) => Number.isFinite(item) && item > 0);
+  return [...new Set(roundedValues)].sort((left, right) => left - right);
+}
+
+function isSameNumberArray(left: number[], right: number[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function normalizeDisplayRefreshRateResult(raw: DisplayRefreshRateResult): DisplayRefreshRateResult {
+  const currentRefreshRate = Number(raw.currentRefreshRate);
+  const roundedRefreshRate = Math.round(Number(raw.roundedRefreshRate));
+  if (!Number.isFinite(currentRefreshRate) || currentRefreshRate <= 0) {
+    throw new Error("无法读取有效刷新率");
+  }
+  if (!Number.isFinite(roundedRefreshRate) || roundedRefreshRate <= 0) {
+    throw new Error("无法读取有效刷新率");
+  }
+  const normalizedSupported = normalizeSupportedRefreshRates(
+    Array.isArray(raw.supportedRefreshRates) ? raw.supportedRefreshRates : [],
+  );
+  if (!normalizedSupported.includes(roundedRefreshRate)) {
+    normalizedSupported.push(roundedRefreshRate);
+    normalizedSupported.sort((left, right) => left - right);
+  }
+  return {
+    currentRefreshRate,
+    roundedRefreshRate,
+    supportedRefreshRates: normalizedSupported,
+  };
+}
+
+function applyRefreshRateSuccess(result: DisplayRefreshRateResult) {
+  if (displayRoundedRefreshRate.value !== result.roundedRefreshRate) {
+    displayRoundedRefreshRate.value = result.roundedRefreshRate;
+  }
+  if (!isSameNumberArray(supportedRefreshRates.value, result.supportedRefreshRates)) {
+    supportedRefreshRates.value = result.supportedRefreshRates;
+  }
+  if (refreshStatus.value !== "success") {
+    refreshStatus.value = "success";
+  }
+  if (refreshErrorText.value) {
+    refreshErrorText.value = "";
+  }
+}
+
+function applyRefreshRateError(error: unknown) {
+  const detail = getErrorMessage(error).trim();
+  refreshErrorText.value = detail || "刷新率检测失败";
+  if (refreshStatus.value !== "error") {
+    refreshStatus.value = "error";
+  }
+}
+
+async function getDisplayRefreshRateStrict() {
+  const raw = await MiuiPower.getDisplayRefreshRate();
+  return normalizeDisplayRefreshRateResult(raw);
+}
+
+async function readRefreshRateForPolling() {
+  if (!shouldRunRefreshRatePolling() || isReadingRefreshRate) {
+    return;
+  }
+  isReadingRefreshRate = true;
+  try {
+    const result = await getDisplayRefreshRateStrict();
+    applyRefreshRateSuccess(result);
+  } catch (error) {
+    applyRefreshRateError(error);
+  } finally {
+    isReadingRefreshRate = false;
+  }
+}
+
+function stopRefreshRatePolling() {
+  if (refreshRatePollTimer !== null) {
+    window.clearInterval(refreshRatePollTimer);
+    refreshRatePollTimer = null;
+  }
+}
+
+function startRefreshRatePolling() {
+  if (!shouldRunRefreshRatePolling() || refreshRatePollTimer !== null) {
+    return;
+  }
+  if (refreshStatus.value !== "success") {
+    refreshStatus.value = "loading";
+  }
+  void readRefreshRateForPolling();
+  refreshRatePollTimer = window.setInterval(() => {
+    void readRefreshRateForPolling();
+  }, REFRESH_RATE_POLL_INTERVAL_MS);
+}
+
+function syncRefreshRatePolling() {
+  if (shouldRunRefreshRatePolling()) {
+    startRefreshRatePolling();
+    return;
+  }
+  stopRefreshRatePolling();
+}
+
+function showLaunchConfirm(reason: LaunchConfirmReason, options: { roundedRefreshRate?: number | null; errorText?: string }) {
+  launchConfirm.reason = reason;
+  launchConfirm.roundedRefreshRate = options.roundedRefreshRate ?? null;
+  launchConfirm.errorText = options.errorText ?? "";
+  launchConfirm.visible = true;
+}
+
+function closeLaunchConfirm() {
+  launchConfirm.visible = false;
+}
+
+async function tryOpenRefreshRateSettings() {
+  try {
+    const primaryResult = await MiuiPower.openScreenRefreshRatePage();
+    if (primaryResult.ok) {
+      return "已尝试打开刷新率设置入口";
+    }
+  } catch {
+    // fallback below
+  }
+  const fallbackResult = await MiuiPower.openDisplaySettings();
+  return fallbackResult.ok ? "已尝试打开显示设置入口" : "无法打开显示设置";
+}
+
+async function openHonorOfKingsDirect() {
+  const result = await MiuiPower.openHonorOfKings();
+  if (result.ok) {
+    return "王者荣耀：已尝试启动";
+  }
+  if (!result.installed) {
+    return `王者荣耀：未检测到安装（${HONOR_OF_KINGS_PACKAGE}）`;
+  }
+  return `王者荣耀：启动失败${result.error ? `（${result.error}）` : ""}`;
+}
+
+async function launchHonorOfKingsFromGamePage() {
+  await runWithLoading("gameLaunchHonorOfKings", "无法启动王者荣耀", async () => {
+    try {
+      const result = await getDisplayRefreshRateStrict();
+      applyRefreshRateSuccess(result);
+      if (result.roundedRefreshRate <= 60) {
+        showLaunchConfirm("low_refresh_rate", { roundedRefreshRate: result.roundedRefreshRate });
+        return `当前检测到 ${result.roundedRefreshRate}Hz，建议先调整刷新率。`;
+      }
+      return await openHonorOfKingsDirect();
+    } catch (error) {
+      applyRefreshRateError(error);
+      showLaunchConfirm("detect_failed", {
+        errorText: refreshErrorText.value || "刷新率检测失败，请确认后再决定是否继续启动。",
+      });
+      return "刷新率检测失败，请确认后再决定是否继续启动。";
+    }
+  });
+}
+
+async function handleAdjustRefreshRate() {
+  closeLaunchConfirm();
+  await runWithLoading("gameAdjustRefreshRate", "无法打开显示设置", async () => {
+    return await tryOpenRefreshRateSettings();
+  });
+}
+
+async function handleContinueLaunch() {
+  closeLaunchConfirm();
+  await runWithLoading("gameContinueLaunch", "无法启动王者荣耀", async () => {
+    return await openHonorOfKingsDirect();
+  });
 }
 
 function formatOpenResult(label: string, result: OpenAppCommandResult) {
@@ -687,16 +984,7 @@ async function openScreenRefreshRatePage() {
 }
 
 async function openHonorOfKings() {
-  await runWithLoading("honorOfKings", "无法启动王者荣耀", async () => {
-    const result = await MiuiPower.openHonorOfKings();
-    if (result.ok) {
-      return "王者荣耀：已尝试启动";
-    }
-    if (!result.installed) {
-      return "王者荣耀：未检测到安装（com.tencent.tmgp.sgame）";
-    }
-    return `王者荣耀：启动失败${result.error ? `，${result.error}` : ""}`;
-  });
+  await runWithLoading("honorOfKings", "无法启动王者荣耀", async () => await openHonorOfKingsDirect());
 }
 
 async function startFocusOverlay() {
@@ -1238,6 +1526,7 @@ const isDraftDirty = computed(
 const navItems: NavItem[] = [
   { id: "page1", label: "Page 1", icon: page1Icon },
   { id: "page2", label: "Page 2", icon: page2Icon },
+  { id: "game", label: "Game", icon: gameIcon },
   { id: "settings", label: "Settings", icon: page3Icon },
 ];
 
@@ -1258,7 +1547,7 @@ const settingsGroups: SettingsGroupDefinition[] = [
   { id: "settings-groups", title: "分组管理", locateKey: "settings-groups", collapsedByDefault: true },
   { id: "settings-custom", title: "自定义按钮", locateKey: "settings-custom", collapsedByDefault: true },
 ];
-const pageOrder: RuntimePageId[] = ["page1", "page2", "settings"];
+const pageOrder: RuntimePageId[] = ["page1", "page2", "game", "settings"];
 
 function resolveStartupPage(config: LauncherConfigV3, state: LauncherUiState): RuntimePageId {
   return config.startupPolicy.mode === "remember" ? state.lastActivePage : config.startupPolicy.fixedPageId;
@@ -1324,6 +1613,7 @@ watch(
 
 watch(activePage, () => {
   persistUiState();
+  syncRefreshRatePolling();
 });
 
 watch(
@@ -1342,7 +1632,7 @@ watch(themeMode, (mode) => {
 });
 
 function toggleRuntimeGroup(pageId: RuntimePageId, groupId: string) {
-  if (pageId === "settings") {
+  if (pageId === "settings" || pageId === "game") {
     return;
   }
   const key = runtimeGroupStateKey(pageId, groupId);
@@ -1354,7 +1644,7 @@ function toggleRuntimeGroup(pageId: RuntimePageId, groupId: string) {
 }
 
 function setRuntimeGroupCollapsed(pageId: RuntimePageId, groupId: string, collapsed: boolean) {
-  if (pageId === "settings") {
+  if (pageId === "settings" || pageId === "game") {
     return;
   }
   collapsedGroupMap.value = {
@@ -1364,7 +1654,7 @@ function setRuntimeGroupCollapsed(pageId: RuntimePageId, groupId: string, collap
 }
 
 function isRuntimeGroupCollapsed(pageId: RuntimePageId, groupId: string) {
-  if (pageId === "settings") {
+  if (pageId === "settings" || pageId === "game") {
     return false;
   }
   return collapsedGroupMap.value[runtimeGroupStateKey(pageId, groupId)] ?? false;
@@ -1583,7 +1873,70 @@ async function switchPage(pageId: RuntimePageId) {
   }
 }
 
+function handleVisibilityChange() {
+  if (!isDocumentVisible()) {
+    stopRefreshRatePolling();
+    return;
+  }
+  if (activePage.value === "game") {
+    startRefreshRatePolling();
+  }
+}
+
+async function teardownCapacitorAppListeners() {
+  try {
+    if (appPauseListenerHandle) {
+      await appPauseListenerHandle.remove();
+      appPauseListenerHandle = null;
+    }
+    if (appResumeListenerHandle) {
+      await appResumeListenerHandle.remove();
+      appResumeListenerHandle = null;
+    }
+  } catch {
+    appPauseListenerHandle = null;
+    appResumeListenerHandle = null;
+  }
+}
+
+async function setupCapacitorAppListeners() {
+  try {
+    await teardownCapacitorAppListeners();
+    const appPlugin = getCapacitorAppPlugin();
+    if (!appPlugin) {
+      return;
+    }
+    appPauseListenerHandle = await appPlugin.addListener("pause", () => {
+      stopRefreshRatePolling();
+    });
+    appResumeListenerHandle = await appPlugin.addListener("resume", () => {
+      if (activePage.value === "game") {
+        startRefreshRatePolling();
+      }
+    });
+  } catch {
+    appPauseListenerHandle = null;
+    appResumeListenerHandle = null;
+  }
+}
+
+onMounted(() => {
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+  }
+  void setupCapacitorAppListeners();
+  if (shouldRunRefreshRatePolling()) {
+    startRefreshRatePolling();
+  }
+});
+
 onBeforeUnmount(() => {
+  stopRefreshRatePolling();
+  isReadingRefreshRate = false;
+  if (typeof document !== "undefined") {
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }
+  void teardownCapacitorAppListeners();
   if (highlightTimer !== null) {
     window.clearTimeout(highlightTimer);
     highlightTimer = null;
@@ -1600,7 +1953,7 @@ const runtimeGroupsByPage = computed<Record<ZonePageId, Zone2Group[]>>(() => ({
 }));
 
 function runtimeGroupsForPage(pageId: RuntimePageId): Zone2Group[] {
-  if (pageId === "settings") {
+  if (pageId === "settings" || pageId === "game") {
     return [];
   }
   return runtimeGroupsByPage.value[pageId];
