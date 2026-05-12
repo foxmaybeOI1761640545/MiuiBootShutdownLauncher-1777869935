@@ -476,6 +476,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
+  type ClipboardTextResult,
   type DisplayRefreshRateResult,
   type LaunchIntentOptions,
   type OpenAppCommandResult,
@@ -518,6 +519,8 @@ type CellSpan = "half" | "full";
 type ThemeMode = "light" | "dark";
 type RefreshStatus = "loading" | "success" | "error";
 type LaunchConfirmReason = "low_refresh_rate" | "detect_failed";
+type ClipboardLinkActionKey = "openUrl" | "openMusicLink" | "openBiliUrl" | "shareUrl";
+type ClipboardUrlProtocol = "http:" | "https:" | "bilibili:" | "qqmusic:";
 const THEME_MODE_STORAGE_KEY = "launcher.theme-mode.v1";
 const HONOR_OF_KINGS_PACKAGE = "com.tencent.tmgp.sgame";
 const REFRESH_RATE_POLL_INTERVAL_MS = 100;
@@ -616,6 +619,13 @@ interface LaunchConfirmState {
   errorText: string;
 }
 
+interface ClipboardUrlCandidate {
+  index: number;
+  url: string;
+  protocol: ClipboardUrlProtocol;
+  hostname: string;
+}
+
 interface CapacitorAppListenerHandle {
   remove: () => Promise<void> | void;
 }
@@ -629,6 +639,12 @@ interface CapacitorAppPluginLike {
 
 const NO_SWIPE_SELECTOR =
   'input, textarea, select, option, [contenteditable="true"], .no-swipe, [data-no-swipe="true"], [data-scroll-lock="true"], [data-drag-handle="true"]';
+const CLIPBOARD_TRAILING_URL_NOISE = ".,;:!?)]}>。，；：！？）】》」";
+const SCHEME_URL_PATTERN = /\b(?:https?:\/\/[^\s<>"'`]+|bilibili:\/\/[^\s<>"'`]*|qqmusic:\/\/[^\s<>"'`]*)/gi;
+const BARE_DOMAIN_URL_PATTERN =
+  /(^|[^\w@:/.-])((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:[/?#][^\s<>"'`]*)?)/gi;
+const BILIBILI_LINK_HOSTS = ["bilibili.com", "b23.tv", "bili2233.cn"];
+const QQ_MUSIC_LINK_HOSTS = ["y.qq.com", "qqmusic.qq.com"];
 
 function resolveInitialThemeMode(): ThemeMode {
   if (typeof window !== "undefined") {
@@ -988,6 +1004,151 @@ async function runSimpleOpenCommand(
   });
 }
 
+function stripTrailingClipboardUrlNoise(value: string) {
+  let output = value.trim();
+  while (output.length > 0 && CLIPBOARD_TRAILING_URL_NOISE.includes(output.charAt(output.length - 1))) {
+    output = output.slice(0, -1);
+  }
+  return output;
+}
+
+function isClipboardUrlProtocol(value: string): value is ClipboardUrlProtocol {
+  return value === "http:" || value === "https:" || value === "bilibili:" || value === "qqmusic:";
+}
+
+function normalizeClipboardUrlCandidate(index: number, rawUrl: string): ClipboardUrlCandidate | null {
+  const cleanedUrl = stripTrailingClipboardUrlNoise(rawUrl);
+  if (!cleanedUrl) {
+    return null;
+  }
+
+  const url = cleanedUrl.includes("://") ? cleanedUrl : `https://${cleanedUrl}`;
+  try {
+    const parsed = new URL(url);
+    const protocol = parsed.protocol.toLowerCase();
+    if (!isClipboardUrlProtocol(protocol)) {
+      return null;
+    }
+    if ((protocol === "http:" || protocol === "https:") && !parsed.hostname) {
+      return null;
+    }
+
+    return {
+      index,
+      url,
+      protocol,
+      hostname: parsed.hostname.toLowerCase(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractClipboardUrlCandidates(text: string) {
+  const rawMatches: Array<{ index: number; text: string }> = [];
+
+  for (const match of text.matchAll(SCHEME_URL_PATTERN)) {
+    if (match[0]) {
+      rawMatches.push({ index: match.index ?? 0, text: match[0] });
+    }
+  }
+
+  for (const match of text.matchAll(BARE_DOMAIN_URL_PATTERN)) {
+    const urlText = match[2] ?? "";
+    if (urlText) {
+      rawMatches.push({
+        index: (match.index ?? 0) + (match[1]?.length ?? 0),
+        text: urlText,
+      });
+    }
+  }
+
+  const seen = new Set<string>();
+  return rawMatches
+    .map((item) => normalizeClipboardUrlCandidate(item.index, item.text))
+    .filter((item): item is ClipboardUrlCandidate => item !== null)
+    .sort((left, right) => left.index - right.index)
+    .filter((item) => {
+      const key = `${item.index}:${item.url}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function isHttpClipboardUrl(candidate: ClipboardUrlCandidate) {
+  return candidate.protocol === "http:" || candidate.protocol === "https:";
+}
+
+function matchesClipboardHost(hostname: string, hosts: string[]) {
+  return hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+}
+
+function findClipboardUrlForAction(actionKey: ClipboardLinkActionKey, text: string) {
+  for (const candidate of extractClipboardUrlCandidates(text)) {
+    if (actionKey === "openUrl" || actionKey === "shareUrl") {
+      if (isHttpClipboardUrl(candidate)) {
+        return candidate.url;
+      }
+      continue;
+    }
+
+    if (actionKey === "openBiliUrl") {
+      if (candidate.protocol === "bilibili:") {
+        return candidate.url;
+      }
+      if (isHttpClipboardUrl(candidate) && matchesClipboardHost(candidate.hostname, BILIBILI_LINK_HOSTS)) {
+        return candidate.url;
+      }
+      continue;
+    }
+
+    if (candidate.protocol === "qqmusic:") {
+      return candidate.url;
+    }
+    if (isHttpClipboardUrl(candidate) && matchesClipboardHost(candidate.hostname, QQ_MUSIC_LINK_HOSTS)) {
+      return candidate.url;
+    }
+  }
+
+  return null;
+}
+
+function getClipboardResultText(result: ClipboardTextResult) {
+  if (!result.ok || !result.hasText) {
+    return "";
+  }
+  return result.text?.trim() ?? "";
+}
+
+async function runClipboardLinkCommand(
+  key: ClipboardLinkActionKey,
+  label: string,
+  command: (url: string) => Promise<OpenAppCommandResult>,
+) {
+  await runWithLoading(key, `${label}：读取剪切板失败`, async () => {
+    const clipboardResult = await MiuiPower.getClipboardText();
+    if (!clipboardResult.ok) {
+      return `${label}：读取剪切板失败`;
+    }
+
+    const clipboardText = getClipboardResultText(clipboardResult);
+    if (!clipboardText) {
+      return `${label}：剪切板没有对应应用链接`;
+    }
+
+    const url = findClipboardUrlForAction(key, clipboardText);
+    if (!url) {
+      return `${label}：剪切板没有对应应用链接`;
+    }
+
+    const result = await command(url);
+    return formatOpenResult(label, result);
+  });
+}
+
 async function openBootShutdownPage() {
   await runWithLoading("bootShutdown", "无法打开定时开关机页面", async () => {
     const result = await MiuiPower.openBootShutdownPage();
@@ -1235,8 +1396,8 @@ const actionByKey: Record<string, ActionItem> = {
     loadingLabel: "正在打开...",
     variant: "pink",
     run: () =>
-      runSimpleOpenCommand("openUrl", "Chrome 打开 URL", () =>
-        MiuiPower.openUrl({ url: "https://www.google.com", packageName: "com.android.chrome" }),
+      runClipboardLinkCommand("openUrl", "Chrome 打开 URL", (url) =>
+        MiuiPower.openUrl({ url, packageName: "com.android.chrome" }),
       ),
   },
   openChromeIncognito: {
@@ -1299,8 +1460,8 @@ const actionByKey: Record<string, ActionItem> = {
     loadingLabel: "正在打开...",
     variant: "pink",
     run: () =>
-      runSimpleOpenCommand("openMusicLink", "打开音乐链接", () =>
-        MiuiPower.openMusicLink({ url: "https://y.qq.com" }),
+      runClipboardLinkCommand("openMusicLink", "打开音乐链接", (url) =>
+        MiuiPower.openMusicLink({ url }),
       ),
   },
   shareText: {
@@ -1319,9 +1480,7 @@ const actionByKey: Record<string, ActionItem> = {
     loadingLabel: "正在打开...",
     variant: "pink",
     run: () =>
-      runSimpleOpenCommand("shareUrl", "系统分享链接", () =>
-        MiuiPower.shareUrl({ url: "https://www.bilibili.com" }),
-      ),
+      runClipboardLinkCommand("shareUrl", "系统分享链接", (url) => MiuiPower.shareUrl({ url })),
   },
   openClash: {
     key: "openClash",
@@ -1353,9 +1512,7 @@ const actionByKey: Record<string, ActionItem> = {
     loadingLabel: "正在打开...",
     variant: "pink",
     run: () =>
-      runSimpleOpenCommand("openBiliUrl", "打开 B 站链接", () =>
-        MiuiPower.openBiliUrl({ url: "https://www.bilibili.com/video/BV1GJ411x7h7" }),
-      ),
+      runClipboardLinkCommand("openBiliUrl", "打开 B 站链接", (url) => MiuiPower.openBiliUrl({ url })),
   },
   openWeather: {
     key: "openWeather",

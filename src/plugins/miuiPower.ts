@@ -39,6 +39,14 @@ export interface DisplayRefreshRateResult {
   supportedRefreshRates: number[];
 }
 
+export interface ClipboardTextResult {
+  ok: boolean;
+  hasText: boolean;
+  text?: string;
+  method: string;
+  error?: string;
+}
+
 export interface OpenAppCommandResult {
   ok: boolean;
   method: string;
@@ -111,6 +119,7 @@ export interface MiuiPowerPlugin {
   openScreenRefreshRatePage(): Promise<OpenScreenRefreshRateResult>;
   openDisplaySettings(): Promise<OpenAppCommandResult>;
   getDisplayRefreshRate(): Promise<DisplayRefreshRateResult>;
+  getClipboardText(): Promise<ClipboardTextResult>;
   openHonorOfKings(): Promise<OpenHonorOfKingsResult>;
   openScreenTimePage(): Promise<OpenAppCommandResult>;
   openUsageAccessSettings(): Promise<OpenAppCommandResult>;

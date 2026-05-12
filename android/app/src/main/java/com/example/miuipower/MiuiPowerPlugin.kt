@@ -1,6 +1,7 @@
 package com.example.miuipower
 
 import android.content.ActivityNotFoundException
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -219,6 +220,35 @@ class MiuiPowerPlugin : Plugin() {
         } catch (e: Exception) {
             Log.w(TAG, "Read display refresh rate failed", e)
             call.reject(e.message ?: "Read refresh rate failed")
+        }
+    }
+
+    @PluginMethod
+    fun getClipboardText(call: PluginCall) {
+        try {
+            val clipboardManager =
+                context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            if (clipboardManager == null) {
+                call.resolve(clipboardTextResult(false, false, error = "ClipboardManager unavailable"))
+                return
+            }
+
+            val primaryClip = clipboardManager.getPrimaryClip()
+            if (primaryClip == null || primaryClip.itemCount <= 0) {
+                call.resolve(clipboardTextResult(true, false))
+                return
+            }
+
+            val text = primaryClip.getItemAt(0).coerceToText(context)?.toString()
+            if (text.isNullOrBlank()) {
+                call.resolve(clipboardTextResult(true, false))
+                return
+            }
+
+            call.resolve(clipboardTextResult(true, true, text = text))
+        } catch (e: Exception) {
+            Log.w(TAG, "Read clipboard text failed", e)
+            call.resolve(clipboardTextResult(false, false, error = e.message ?: e.javaClass.simpleName))
         }
     }
 
@@ -1292,6 +1322,25 @@ class MiuiPowerPlugin : Plugin() {
         return JSObject().apply {
             put("ok", ok)
             put("method", method)
+        }
+    }
+
+    private fun clipboardTextResult(
+        ok: Boolean,
+        hasText: Boolean,
+        text: String? = null,
+        error: String? = null,
+    ): JSObject {
+        return JSObject().apply {
+            put("ok", ok)
+            put("hasText", hasText)
+            put("method", "primary_clip")
+            if (text != null) {
+                put("text", text)
+            }
+            if (error != null) {
+                put("error", error)
+            }
         }
     }
 }
