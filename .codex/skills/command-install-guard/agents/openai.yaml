@@ -1,0 +1,4 @@
+interface:
+  display_name: "Command Install Guard"
+  short_description: "Guard failed commands before installing dependencies"
+  default_prompt: "Use $command-install-guard to handle a failed command safely before installing any missing dependency."
