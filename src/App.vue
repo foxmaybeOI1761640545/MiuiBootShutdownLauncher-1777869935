@@ -503,9 +503,14 @@ import {
   type ZonePageId,
 } from "./launcherConfig";
 import page1Icon from "./assets/nav-page-1.svg";
+import page1DarkIcon from "./assets/nav-page-1-dark.svg";
 import page2Icon from "./assets/nav-page-2.svg";
 import page3Icon from "./assets/nav-page-3.svg";
+import page3DarkIcon from "./assets/nav-page-3-dark.svg";
+import page3ActiveIcon from "./assets/nav-page-3-active.svg";
 import gameIcon from "./assets/nav-game.svg";
+import gameDarkIcon from "./assets/nav-game-dark.svg";
+import gameActiveIcon from "./assets/nav-game-active.svg";
 
 type RuntimePageId = LauncherRuntimePageId;
 type ActionVariant = "pink" | "beige";
@@ -530,6 +535,13 @@ interface NavItem {
   id: RuntimePageId;
   label: string;
   icon: string;
+}
+
+interface NavIconVariants {
+  defaultIcon: string;
+  darkDefaultIcon?: string;
+  activeIcon?: string;
+  darkActiveIcon?: string;
 }
 
 interface RuntimeZone2Entry {
@@ -681,6 +693,27 @@ const launchConfirmMessage = computed(() => {
   }
   return launchConfirm.errorText || "暂时无法读取当前屏幕刷新率。";
 });
+
+function resolveNavIcon(pageId: RuntimePageId): string {
+  const iconVariants = navIconByPage[pageId];
+  const isDarkTheme = themeMode.value === "dark";
+  const isActivePage = activePage.value === pageId;
+
+  if (isActivePage) {
+    if (isDarkTheme && iconVariants.darkActiveIcon) {
+      return iconVariants.darkActiveIcon;
+    }
+    if (iconVariants.activeIcon) {
+      return iconVariants.activeIcon;
+    }
+  }
+
+  if (isDarkTheme && iconVariants.darkDefaultIcon) {
+    return iconVariants.darkDefaultIcon;
+  }
+
+  return iconVariants.defaultIcon;
+}
 
 function spanClass(span: CellSpan) {
   return span === "full" ? "span-full" : "span-half";
@@ -1523,12 +1556,40 @@ const isDraftDirty = computed(
   () => JSON.stringify(draftConfig.value) !== JSON.stringify(savedConfig.value),
 );
 
-const navItems: NavItem[] = [
-  { id: "page1", label: "Page 1", icon: page1Icon },
-  { id: "page2", label: "Page 2", icon: page2Icon },
-  { id: "game", label: "Game", icon: gameIcon },
-  { id: "settings", label: "Settings", icon: page3Icon },
+const navItemMeta: Array<{ id: RuntimePageId; label: string }> = [
+  { id: "page1", label: "Page 1" },
+  { id: "page2", label: "Page 2" },
+  { id: "game", label: "Game" },
+  { id: "settings", label: "Settings" },
 ];
+
+const navIconByPage: Record<RuntimePageId, NavIconVariants> = {
+  page1: {
+    defaultIcon: page1Icon,
+    darkDefaultIcon: page1DarkIcon,
+  },
+  page2: {
+    defaultIcon: page2Icon,
+  },
+  game: {
+    defaultIcon: gameIcon,
+    darkDefaultIcon: gameDarkIcon,
+    activeIcon: gameActiveIcon,
+  },
+  settings: {
+    defaultIcon: page3Icon,
+    darkDefaultIcon: page3DarkIcon,
+    activeIcon: page3ActiveIcon,
+  },
+};
+
+const navItems = computed<NavItem[]>(() =>
+  navItemMeta.map((item) => ({
+    id: item.id,
+    label: item.label,
+    icon: resolveNavIcon(item.id),
+  })),
+);
 
 const editableBuiltinOptions = computed(() =>
   editableBuiltinKeys.map((key) => ({
