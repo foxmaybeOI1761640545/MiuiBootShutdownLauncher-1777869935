@@ -113,6 +113,14 @@ class HeartRateBleManager(
         return storage.exportHistory(context, format, sinceMs, untilMs)
     }
 
+    fun getLastExport(context: Context): JSObject {
+        return storage.getLastExport(context)
+    }
+
+    fun getOrCreateExport(context: Context, format: String): HeartRateExportFile {
+        return storage.getOrCreateExport(context, format)
+    }
+
     @SuppressLint("MissingPermission")
     fun scan(durationMs: Long, onComplete: (JSObject) -> Unit) {
         val adapter = bluetoothAdapter()

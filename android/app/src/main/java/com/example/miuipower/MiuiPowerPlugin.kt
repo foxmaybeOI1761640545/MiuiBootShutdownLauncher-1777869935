@@ -2,8 +2,10 @@ package com.example.miuipower
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -17,8 +19,10 @@ import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import androidx.core.content.ContextCompat
+import com.example.miuipower.heartrate.HeartRateExportFile
 import com.example.miuipower.heartrate.HeartRateEnvironment
 import com.example.miuipower.heartrate.HeartRateForegroundService
+import com.example.miuipower.heartrate.HeartRateGithubUploader
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -43,6 +47,7 @@ class MiuiPowerPlugin : Plugin() {
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val heartRateManager by lazy { HeartRateEnvironment.manager(context.applicationContext) }
+    private val githubUploader by lazy { HeartRateGithubUploader(context.applicationContext) }
     private var removeHeartRateEventSink: (() -> Unit)? = null
 
     override fun load() {
@@ -372,6 +377,7 @@ class MiuiPowerPlugin : Plugin() {
             return
         }
         if (!hasHeartRateNotificationPermission()) {
+            // Product policy: recording starts only when the user can see and stop the foreground notification.
             call.resolve(result(false, "notification_permission_required").apply {
                 put("state", heartRateManager.getStateJson())
             })
@@ -419,11 +425,95 @@ class MiuiPowerPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun consumeOpenAppIntent(call: PluginCall) {
+        val intent = activity?.intent
+        val openPage = intent?.getStringExtra("openPage").orEmpty()
+        val fromNotification = intent?.getBooleanExtra("fromNotification", false) ?: false
+        if (intent != null && (openPage.isNotBlank() || fromNotification)) {
+            intent.removeExtra("openPage")
+            intent.removeExtra("fromNotification")
+        }
+        call.resolve(JSObject().apply {
+            put("ok", true)
+            put("method", "activity_intent")
+            put("openPage", openPage)
+            put("fromNotification", fromNotification)
+        })
+    }
+
+    @PluginMethod
     fun exportHeartRateHistory(call: PluginCall) {
         val format = call.getString("format") ?: "jsonl"
         val sinceMs = call.getLong("sinceMs")
         val untilMs = call.getLong("untilMs")
         call.resolve(heartRateManager.exportHistory(context, format, sinceMs, untilMs))
+    }
+
+    @PluginMethod
+    fun getLastHeartRateExport(call: PluginCall) {
+        call.resolve(heartRateManager.getLastExport(context))
+    }
+
+    @PluginMethod
+    fun shareHeartRateExport(call: PluginCall) {
+        val format = call.getString("format") ?: "jsonl"
+        val target = call.getString("target") ?: "system"
+        val result = try {
+            shareExportFile(heartRateManager.getOrCreateExport(context, format), target)
+        } catch (error: Exception) {
+            result(false, "heart_rate_share_failed").apply {
+                put("error", error.message ?: error.javaClass.simpleName)
+            }
+        }
+        call.resolve(result)
+    }
+
+    @PluginMethod
+    fun saveHeartRateExportToDownloads(call: PluginCall) {
+        val format = call.getString("format") ?: "jsonl"
+        resolveAsync(call, "heart_rate_download_failed") {
+            saveExportToDownloads(heartRateManager.getOrCreateExport(context, format))
+        }
+    }
+
+    @PluginMethod
+    fun saveGitHubExportSettings(call: PluginCall) {
+        val result = try {
+            githubUploader.saveSettings(
+                owner = call.getString("owner") ?: "",
+                repo = call.getString("repo") ?: "",
+                branch = call.getString("branch") ?: "main",
+                pathPrefix = call.getString("pathPrefix") ?: "data/heart_rate",
+                token = call.getString("token"),
+            )
+        } catch (error: Exception) {
+            result(false, "github_settings_failed").apply {
+                put("error", error.message ?: error.javaClass.simpleName)
+            }
+        }
+        call.resolve(result)
+    }
+
+    @PluginMethod
+    fun getGitHubExportSettings(call: PluginCall) {
+        call.resolve(githubUploader.getSettings())
+    }
+
+    @PluginMethod
+    fun testGitHubExportSettings(call: PluginCall) {
+        resolveAsync(call, "github_test_failed") {
+            githubUploader.testSettings()
+        }
+    }
+
+    @PluginMethod
+    fun uploadHeartRateExportToGitHub(call: PluginCall) {
+        val format = call.getString("format") ?: "jsonl"
+        val path = call.getString("path")
+        resolveAsync(call, "github_upload_failed") {
+            val export = heartRateManager.getOrCreateExport(context, format)
+            githubUploader.uploadExport(export, path)
+        }
     }
 
     @PluginMethod
@@ -1564,6 +1654,133 @@ class MiuiPowerPlugin : Plugin() {
             put("requiredPermissions", JSArray(requiredHeartRatePermissionStrings()))
             put("bleGranted", hasHeartRateBlePermissions())
             put("notificationGranted", hasHeartRateNotificationPermission())
+        }
+    }
+
+    private fun shareExportFile(export: HeartRateExportFile, target: String): JSObject {
+        val uri = Uri.parse(export.result.optString("contentUri", ""))
+        val mimeType = export.result.optString("mimeType", "*/*").ifBlank { "*/*" }
+        val fileName = export.result.optString("fileName", export.file.name)
+        val normalizedTarget = if (target == "wechat") "wechat" else "system"
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, fileName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = ClipData.newUri(context.contentResolver, fileName, uri)
+            if (normalizedTarget == "wechat") {
+                setPackage(PKG_WECHAT)
+            }
+        }
+
+        val launched = if (normalizedTarget == "wechat") {
+            startActivitySafely(sendIntent)
+        } else {
+            startActivitySafely(Intent.createChooser(sendIntent, "Share heart-rate export").apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            })
+        }
+        if (launched) {
+            return exportResult(export, true, if (normalizedTarget == "wechat") "action_send_wechat" else "action_send_chooser").apply {
+                put("target", normalizedTarget)
+            }
+        }
+
+        val fallback = Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+            type = "*/*"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, fileName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = ClipData.newUri(context.contentResolver, fileName, uri)
+        }, "Share heart-rate export").apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val fallbackLaunched = startActivitySafely(fallback)
+        return exportResult(export, fallbackLaunched, if (fallbackLaunched) "action_send_fallback" else "action_send_failed").apply {
+            put("target", normalizedTarget)
+            if (!fallbackLaunched) {
+                put("error", "No app accepted the heart-rate export share intent.")
+            }
+        }
+    }
+
+    private fun saveExportToDownloads(export: HeartRateExportFile): JSObject {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return exportResult(export, false, "downloads_requires_android_10").apply {
+                put("error", "Saving to Downloads without storage permission is supported on Android 10+.")
+            }
+        }
+
+        val resolver = context.contentResolver
+        val mimeType = export.result.optString("mimeType", "application/octet-stream")
+            .ifBlank { "application/octet-stream" }
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, export.file.name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/heart_rate_exports")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val savedUri = resolver.insert(collection, values)
+            ?: return exportResult(export, false, "media_store_insert_failed").apply {
+                put("error", "Android MediaStore did not return a Downloads URI.")
+            }
+        try {
+            resolver.openOutputStream(savedUri)?.use { output ->
+                export.file.inputStream().use { input ->
+                    input.copyTo(output)
+                }
+            } ?: throw IllegalStateException("Unable to open Downloads output stream.")
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(savedUri, values, null, null)
+            return exportResult(export, true, "media_store_downloads").apply {
+                put("savedUri", savedUri.toString())
+            }
+        } catch (error: Exception) {
+            runCatching { resolver.delete(savedUri, null, null) }
+            return exportResult(export, false, "media_store_write_failed").apply {
+                put("savedUri", savedUri.toString())
+                put("error", error.message ?: error.javaClass.simpleName)
+            }
+        }
+    }
+
+    private fun exportResult(export: HeartRateExportFile, ok: Boolean, method: String): JSObject {
+        return JSObject().apply {
+            put("ok", ok)
+            put("method", method)
+            put("format", export.result.optString("format", "jsonl"))
+            put("contentUri", export.result.optString("contentUri", ""))
+            put("fileName", export.result.optString("fileName", export.file.name))
+            put("mimeType", export.result.optString("mimeType", "application/octet-stream"))
+            put("rowCount", export.result.optInt("rowCount", 0))
+            put("sizeBytes", export.result.optLong("sizeBytes", export.file.length()))
+            put("createdAtMs", export.result.optLong("createdAtMs", export.file.lastModified()))
+        }
+    }
+
+    private fun startActivitySafely(intent: Intent): Boolean {
+        return try {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            true
+        } catch (error: Exception) {
+            Log.w(TAG, "Heart-rate export intent launch failed", error)
+            false
+        }
+    }
+
+    private fun resolveAsync(call: PluginCall, failureMethod: String, task: () -> JSObject) {
+        thread {
+            val output = try {
+                task()
+            } catch (error: Exception) {
+                result(false, failureMethod).apply {
+                    put("error", error.message ?: error.javaClass.simpleName)
+                }
+            }
+            mainHandler.post { call.resolve(output) }
         }
     }
 

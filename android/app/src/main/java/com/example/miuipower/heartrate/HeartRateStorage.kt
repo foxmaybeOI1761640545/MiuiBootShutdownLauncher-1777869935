@@ -10,10 +10,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+data class HeartRateExportFile(
+    val file: File,
+    val result: JSObject,
+)
+
 class HeartRateStorage(private val filesDir: File) {
     private val rootDir = File(filesDir, "heart_rate")
     private val samplesFile = File(rootDir, "samples.jsonl")
     private val sessionsFile = File(rootDir, "sessions.jsonl")
+    private val lastExportFile = File(rootDir, "last_export.json")
 
     @Synchronized
     fun appendSample(sample: HeartRateSample) {
@@ -84,13 +90,42 @@ class HeartRateStorage(private val filesDir: File) {
 
     @Synchronized
     fun exportHistory(context: Context, format: String, sinceMs: Long?, untilMs: Long?): JSObject {
+        return createExportFile(context, format, sinceMs, untilMs).result
+    }
+
+    @Synchronized
+    fun getLastExport(context: Context): JSObject {
+        val metadata = readLastExportMetadata()
+            ?: return JSObject().apply {
+                put("ok", false)
+                put("method", "no_export")
+                put("error", "No heart-rate export has been created yet.")
+            }
+        return exportFileFromMetadata(context, metadata)?.result ?: JSObject().apply {
+            put("ok", false)
+            put("method", "last_export_missing")
+            put("format", metadata.optString("format", ""))
+            put("fileName", metadata.optString("fileName", ""))
+            put("rowCount", metadata.optInt("rowCount", 0))
+            put("createdAtMs", metadata.optLong("createdAtMs", 0L))
+            put("error", "The last heart-rate export file is no longer available.")
+        }
+    }
+
+    @Synchronized
+    fun getOrCreateExport(context: Context, format: String): HeartRateExportFile {
+        val normalizedFormat = normalizeFormat(format)
+        return readLastExport(context, normalizedFormat) ?: createExportFile(context, normalizedFormat, null, null)
+    }
+
+    private fun createExportFile(context: Context, format: String, sinceMs: Long?, untilMs: Long?): HeartRateExportFile {
         ensureRootDir()
-        val normalizedFormat = if (format == "csv") "csv" else "jsonl"
+        val normalizedFormat = normalizeFormat(format)
         val exportDir = File(context.cacheDir, "heart_rate_exports").apply { mkdirs() }
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val extension = if (normalizedFormat == "csv") "csv" else "jsonl"
-        val mimeType = if (normalizedFormat == "csv") "text/csv" else "application/x-ndjson"
-        val outputFile = File(exportDir, "heart_rate_$timestamp.$extension")
+        val mimeType = mimeTypeForFormat(normalizedFormat)
+        val outputFile = uniqueExportFile(exportDir, "heart_rate_$timestamp", extension)
         val samples = readSampleObjects(sinceMs, untilMs).toList()
 
         if (normalizedFormat == "csv") {
@@ -111,21 +146,109 @@ class HeartRateStorage(private val filesDir: File) {
             outputFile.writeText(samples.joinToString(separator = "\n") { it.toString() } + if (samples.isNotEmpty()) "\n" else "", Charsets.UTF_8)
         }
 
+        val createdAtMs = System.currentTimeMillis()
+        val result = buildExportResult(
+            context = context,
+            file = outputFile,
+            format = normalizedFormat,
+            mimeType = mimeType,
+            rowCount = samples.size,
+            createdAtMs = createdAtMs,
+        )
+        writeLastExportMetadata(outputFile, result)
+        return HeartRateExportFile(outputFile, result)
+    }
+
+    private fun readLastExport(context: Context, format: String?): HeartRateExportFile? {
+        val metadata = readLastExportMetadata() ?: return null
+        val metadataFormat = metadata.optString("format", "")
+        if (format != null && metadataFormat != format) {
+            return null
+        }
+        return exportFileFromMetadata(context, metadata)
+    }
+
+    private fun exportFileFromMetadata(context: Context, metadata: JSONObject): HeartRateExportFile? {
+        val path = metadata.optString("path", "").takeIf { it.isNotBlank() } ?: return null
+        val file = File(path)
+        if (!file.exists() || !file.isFile) {
+            return null
+        }
+        val format = normalizeFormat(metadata.optString("format", "jsonl"))
+        val mimeType = metadata.optString("mimeType", mimeTypeForFormat(format)).takeIf { it.isNotBlank() }
+            ?: mimeTypeForFormat(format)
+        val rowCount = metadata.optInt("rowCount", 0)
+        val createdAtMs = metadata.optLong("createdAtMs", file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis())
+        return HeartRateExportFile(
+            file,
+            buildExportResult(context, file, format, mimeType, rowCount, createdAtMs),
+        )
+    }
+
+    private fun buildExportResult(
+        context: Context,
+        file: File,
+        format: String,
+        mimeType: String,
+        rowCount: Int,
+        createdAtMs: Long,
+    ): JSObject {
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
-            outputFile,
+            file,
         )
 
         return JSObject().apply {
             put("ok", true)
-            put("method", "file_provider")
-            put("format", normalizedFormat)
+            put("method", "cache_fileprovider")
+            put("format", format)
             put("contentUri", uri.toString())
-            put("fileName", outputFile.name)
+            put("fileName", file.name)
             put("mimeType", mimeType)
-            put("rowCount", samples.size)
+            put("rowCount", rowCount)
+            put("sizeBytes", file.length())
+            put("createdAtMs", createdAtMs)
         }
+    }
+
+    private fun writeLastExportMetadata(file: File, result: JSObject) {
+        ensureRootDir()
+        val metadata = JSONObject().apply {
+            put("path", file.absolutePath)
+            put("fileName", result.optString("fileName", file.name))
+            put("format", result.optString("format", "jsonl"))
+            put("mimeType", result.optString("mimeType", "application/x-ndjson"))
+            put("rowCount", result.optInt("rowCount", 0))
+            put("sizeBytes", result.optLong("sizeBytes", file.length()))
+            put("createdAtMs", result.optLong("createdAtMs", System.currentTimeMillis()))
+        }
+        lastExportFile.writeText(metadata.toString(), Charsets.UTF_8)
+    }
+
+    private fun readLastExportMetadata(): JSONObject? {
+        if (!lastExportFile.exists()) {
+            return null
+        }
+        return runCatching { JSONObject(lastExportFile.readText(Charsets.UTF_8)) }.getOrNull()
+    }
+
+    private fun uniqueExportFile(exportDir: File, baseName: String, extension: String): File {
+        var candidate = File(exportDir, "$baseName.$extension")
+        var suffix = 1
+        while (candidate.exists()) {
+            candidate = File(exportDir, "${baseName}_$suffix.$extension")
+            suffix += 1
+        }
+        return candidate
+    }
+
+    private fun normalizeFormat(format: String): String {
+        return if (format == "csv") "csv" else "jsonl"
+    }
+
+    private fun mimeTypeForFormat(format: String): String {
+        return if (format == "csv") "text/csv" else "application/x-ndjson"
     }
 
     private fun ensureRootDir() {

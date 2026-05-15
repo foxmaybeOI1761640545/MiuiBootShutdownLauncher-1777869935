@@ -150,6 +150,7 @@
                   <div>
                     <p class="run-card-label">Local JSONL</p>
                     <strong>{{ heartRateHistoryCount }} rows</strong>
+                    <small>{{ lastHeartRateExportText }}</small>
                   </div>
                   <div class="settings-row-btns">
                     <button
@@ -185,7 +186,59 @@
                     <strong>{{ sample.bpm }} BPM</strong>
                   </div>
                 </div>
-                <p v-if="heartRateExportText" class="run-export-note">{{ heartRateExportText }}</p>
+                <div class="run-export-actions">
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="shareHeartRateExport('csv')">
+                    Share CSV
+                  </button>
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="shareHeartRateExport('jsonl')">
+                    Share JSONL
+                  </button>
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="shareHeartRateExport('csv', 'wechat')">
+                    WeChat
+                  </button>
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="saveHeartRateExportToDownloads('csv')">
+                    Save CSV
+                  </button>
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="saveHeartRateExportToDownloads('jsonl')">
+                    Save JSONL
+                  </button>
+                </div>
+                <div class="run-github-fields">
+                  <label>
+                    <span>Owner</span>
+                    <input v-model.trim="githubExportForm.owner" type="text" placeholder="foxmaybeoi1761640545" />
+                  </label>
+                  <label>
+                    <span>Repo</span>
+                    <input v-model.trim="githubExportForm.repo" type="text" placeholder="heart-rate-data" />
+                  </label>
+                  <label>
+                    <span>Branch</span>
+                    <input v-model.trim="githubExportForm.branch" type="text" placeholder="main" />
+                  </label>
+                  <label>
+                    <span>Path</span>
+                    <input v-model.trim="githubExportForm.pathPrefix" type="text" placeholder="data/heart_rate" />
+                  </label>
+                  <label class="run-github-token">
+                    <span>PAT</span>
+                    <input v-model.trim="githubExportForm.token" type="password" :placeholder="githubTokenPlaceholder" />
+                  </label>
+                </div>
+                <div class="run-export-actions">
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="saveGitHubExportSettings">
+                    Save GitHub
+                  </button>
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="testGitHubExportSettings">
+                    Test
+                  </button>
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="uploadHeartRateExportToGitHub('csv')">
+                    Upload CSV
+                  </button>
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="uploadHeartRateExportToGitHub('jsonl')">
+                    Upload JSONL
+                  </button>
+                </div>
               </article>
 
               <p v-if="heartRateState.error" class="game-refresh-error">{{ heartRateState.error }}</p>
@@ -631,8 +684,11 @@ import {
   type ClipboardTextResult,
   type DisplayRefreshRateResult,
   type HeartRateDevice,
+  type HeartRateExportFormat,
+  type HeartRateExportResult,
   type HeartRateSample,
   type HeartRateState,
+  type GitHubExportSettingsResult,
   type LaunchIntentOptions,
   type OpenAppCommandResult,
   type LaunchIntentExtraValue,
@@ -782,6 +838,15 @@ interface ClipboardUrlCandidate {
   hostname: string;
 }
 
+interface GitHubExportForm {
+  owner: string;
+  repo: string;
+  branch: string;
+  pathPrefix: string;
+  token: string;
+  tokenSaved: boolean;
+}
+
 interface CapacitorAppListenerHandle {
   remove: () => Promise<void> | void;
 }
@@ -869,7 +934,15 @@ const heartRateDevices = ref<HeartRateDevice[]>([]);
 const lastHeartRateDevice = ref<HeartRateDevice | null>(null);
 const heartRateHistory = ref<HeartRateSample[]>([]);
 const liveHeartRateSamples = ref<HeartRateSample[]>([]);
-const heartRateExportText = ref("");
+const lastHeartRateExport = ref<HeartRateExportResult | null>(null);
+const githubExportForm = reactive<GitHubExportForm>({
+  owner: "",
+  repo: "",
+  branch: "main",
+  pathPrefix: "data/heart_rate",
+  token: "",
+  tokenSaved: false,
+});
 let refreshRatePollTimer: number | null = null;
 let isReadingRefreshRate = false;
 let appPauseListenerHandle: CapacitorAppListenerHandle | null = null;
@@ -907,6 +980,10 @@ const heartRateBatteryText = computed(() => {
   return typeof level === "number" ? `${level}%` : "--";
 });
 const heartRateHistoryCount = computed(() => heartRateHistory.value.length);
+const lastHeartRateExportText = computed(() =>
+  lastHeartRateExport.value?.ok ? formatHeartRateExportSummary(lastHeartRateExport.value) : "No export yet",
+);
+const githubTokenPlaceholder = computed(() => (githubExportForm.tokenSaved ? "Saved token unchanged" : "Fine-grained PAT"));
 const heartRateTrendPolyline = computed(() => buildHeartRateTrendPolyline(liveHeartRateSamples.value.slice(-60)));
 const heartRateServiceText = computed(() => {
   if (!heartRateState.value.serviceRunning) {
@@ -1099,9 +1176,56 @@ function formatHeartRateFlags(sample: HeartRateSample | null) {
   return `0x${sample.flags.toString(16).toUpperCase().padStart(2, "0")} / ${sample.flags}`;
 }
 
+function formatBytes(value: number | undefined) {
+  const bytes = Number(value ?? 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatExportTime(value: number | undefined) {
+  if (typeof value !== "number" || value <= 0) {
+    return "--";
+  }
+  return new Date(value).toLocaleString([], {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function formatHeartRateExportSummary(result: HeartRateExportResult) {
+  const name = result.fileName ?? "heart_rate";
+  const rows = Number(result.rowCount ?? 0);
+  return `${name} · ${rows} rows · ${formatBytes(result.sizeBytes)} · ${formatExportTime(result.createdAtMs)}`;
+}
+
+function applyLastHeartRateExport(result: HeartRateExportResult) {
+  if (result.ok) {
+    lastHeartRateExport.value = result;
+  }
+}
+
 async function refreshHeartRateState() {
   try {
     applyHeartRateState(await MiuiPower.getHeartRateState());
+  } catch {
+    // Native plugin may be unavailable in browser preview.
+  }
+}
+
+async function refreshHeartRateServiceState() {
+  try {
+    applyHeartRateState(await MiuiPower.getHeartRateServiceState());
   } catch {
     // Native plugin may be unavailable in browser preview.
   }
@@ -1123,6 +1247,52 @@ async function refreshLastHeartRateDevice() {
   } catch {
     lastHeartRateDevice.value = null;
   }
+}
+
+async function refreshLastHeartRateExport() {
+  try {
+    const result = await MiuiPower.getLastHeartRateExport();
+    lastHeartRateExport.value = result.ok ? result : null;
+  } catch {
+    lastHeartRateExport.value = null;
+  }
+}
+
+function applyGitHubExportSettings(result: GitHubExportSettingsResult) {
+  githubExportForm.owner = result.owner ?? "";
+  githubExportForm.repo = result.repo ?? "";
+  githubExportForm.branch = result.branch || "main";
+  githubExportForm.pathPrefix = result.pathPrefix || "data/heart_rate";
+  githubExportForm.tokenSaved = Boolean(result.tokenSaved);
+}
+
+async function refreshGitHubExportSettings() {
+  try {
+    applyGitHubExportSettings(await MiuiPower.getGitHubExportSettings());
+  } catch {
+    githubExportForm.tokenSaved = false;
+  }
+}
+
+async function consumeOpenAppIntent() {
+  try {
+    const result = await MiuiPower.consumeOpenAppIntent();
+    if (result.fromNotification || result.openPage === "run") {
+      await switchPage("run");
+    }
+  } catch {
+    // Native plugin may be unavailable in browser preview.
+  }
+}
+
+async function syncHeartRateOnResume() {
+  await consumeOpenAppIntent();
+  await Promise.all([
+    refreshHeartRateState(),
+    refreshHeartRateServiceState(),
+    refreshHeartRateHistory(),
+    refreshLastHeartRateExport(),
+  ]);
 }
 
 async function requestHeartRatePermissions() {
@@ -1213,14 +1383,86 @@ async function toggleHeartRateAutoReconnect() {
   });
 }
 
-async function exportHeartRateHistory(format: "jsonl" | "csv") {
+async function exportHeartRateHistory(format: HeartRateExportFormat) {
   await runWithLoading(`heartRateExport${format}`, "Heart-rate export failed", async () => {
     const result = await MiuiPower.exportHeartRateHistory({ format });
     if (result.ok) {
-      heartRateExportText.value = `${result.fileName ?? "heart_rate"} · ${result.rowCount ?? 0} rows`;
-      return `Heart-rate ${format.toUpperCase()} export ready.`;
+      applyLastHeartRateExport(result);
+      return `Heart-rate ${format.toUpperCase()} export ready: ${formatHeartRateExportSummary(result)}.`;
     }
     return formatOpenResult("Heart-rate export", result);
+  });
+}
+
+async function shareHeartRateExport(format: HeartRateExportFormat, target: "system" | "wechat" = "system") {
+  await runWithLoading(`heartRateShare${format}${target}`, "Heart-rate share failed", async () => {
+    const result = await MiuiPower.shareHeartRateExport({ format, target });
+    if (result.ok) {
+      applyLastHeartRateExport(result);
+      return target === "wechat"
+        ? `Heart-rate ${format.toUpperCase()} export sent to WeChat.`
+        : `Heart-rate ${format.toUpperCase()} share sheet opened.`;
+    }
+    return formatOpenResult("Heart-rate share", result);
+  });
+}
+
+async function saveHeartRateExportToDownloads(format: HeartRateExportFormat) {
+  await runWithLoading(`heartRateSave${format}`, "Heart-rate save failed", async () => {
+    const result = await MiuiPower.saveHeartRateExportToDownloads({ format });
+    if (result.ok) {
+      applyLastHeartRateExport(result);
+      return `Saved ${result.fileName ?? "heart_rate"} to Downloads.`;
+    }
+    return formatOpenResult("Heart-rate save", result);
+  });
+}
+
+async function persistGitHubExportSettings() {
+  const result = await MiuiPower.saveGitHubExportSettings({
+    owner: githubExportForm.owner,
+    repo: githubExportForm.repo,
+    branch: githubExportForm.branch,
+    pathPrefix: githubExportForm.pathPrefix,
+    token: githubExportForm.token,
+  });
+  if (result.ok) {
+    applyGitHubExportSettings(result);
+    githubExportForm.token = "";
+  }
+  return result;
+}
+
+async function saveGitHubExportSettings() {
+  await runWithLoading("githubExportSettings", "GitHub settings save failed", async () => {
+    const result = await persistGitHubExportSettings();
+    return result.ok ? "GitHub export settings saved." : formatOpenResult("GitHub settings", result);
+  });
+}
+
+async function testGitHubExportSettings() {
+  await runWithLoading("githubExportTest", "GitHub connection test failed", async () => {
+    const saved = await persistGitHubExportSettings();
+    if (!saved.ok) {
+      return formatOpenResult("GitHub settings", saved);
+    }
+    const result = await MiuiPower.testGitHubExportSettings();
+    return result.ok ? "GitHub connection OK." : formatOpenResult("GitHub test", result);
+  });
+}
+
+async function uploadHeartRateExportToGitHub(format: HeartRateExportFormat) {
+  await runWithLoading(`githubUpload${format}`, "GitHub upload failed", async () => {
+    const saved = await persistGitHubExportSettings();
+    if (!saved.ok) {
+      return formatOpenResult("GitHub settings", saved);
+    }
+    const result = await MiuiPower.uploadHeartRateExportToGitHub({ format });
+    await refreshLastHeartRateExport();
+    if (result.ok) {
+      return `Uploaded ${result.path ?? result.fileName ?? "heart-rate export"} to GitHub.`;
+    }
+    return formatOpenResult("GitHub upload", result);
   });
 }
 
@@ -2557,6 +2799,7 @@ function handleVisibilityChange() {
   if (activePage.value === "game") {
     startRefreshRatePolling();
   }
+  void syncHeartRateOnResume();
 }
 
 async function teardownCapacitorAppListeners() {
@@ -2589,8 +2832,7 @@ async function setupCapacitorAppListeners() {
       if (activePage.value === "game") {
         startRefreshRatePolling();
       }
-      void refreshHeartRateState();
-      void refreshHeartRateHistory();
+      void syncHeartRateOnResume();
     });
   } catch {
     appPauseListenerHandle = null;
@@ -2647,9 +2889,9 @@ onMounted(() => {
   }
   void setupCapacitorAppListeners();
   void setupHeartRateListeners();
-  void refreshHeartRateState();
+  void syncHeartRateOnResume();
   void refreshLastHeartRateDevice();
-  void refreshHeartRateHistory();
+  void refreshGitHubExportSettings();
   if (shouldRunRefreshRatePolling()) {
     startRefreshRatePolling();
   }

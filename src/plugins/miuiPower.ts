@@ -116,14 +116,58 @@ export interface HeartRateHistoryResult {
   samples: HeartRateSample[];
 }
 
+export type HeartRateExportFormat = "jsonl" | "csv";
+export type HeartRateShareTarget = "system" | "wechat";
+
 export interface HeartRateExportResult {
   ok: boolean;
   method: string;
-  format: "jsonl" | "csv";
+  format?: HeartRateExportFormat;
   contentUri?: string;
   fileName?: string;
   mimeType?: string;
   rowCount?: number;
+  sizeBytes?: number;
+  createdAtMs?: number;
+  savedUri?: string;
+  target?: HeartRateShareTarget;
+  statusCode?: number;
+  path?: string;
+  error?: string;
+}
+
+export interface GitHubExportSettings {
+  owner: string;
+  repo: string;
+  branch: string;
+  pathPrefix: string;
+  tokenSaved: boolean;
+}
+
+export interface GitHubExportSettingsResult extends GitHubExportSettings {
+  ok: boolean;
+  method: string;
+  statusCode?: number;
+  error?: string;
+}
+
+export interface GitHubUploadResult {
+  ok: boolean;
+  method: string;
+  fileName?: string;
+  path?: string;
+  rowCount?: number;
+  commitSha?: string;
+  htmlUrl?: string;
+  statusCode?: number;
+  error?: string;
+}
+
+export interface OpenAppIntentResult {
+  ok: boolean;
+  method: string;
+  openPage?: string;
+  fromNotification?: boolean;
   error?: string;
 }
 
@@ -218,11 +262,31 @@ export interface MiuiPowerPlugin {
   stopHeartRateRecording(): Promise<OpenAppCommandResult>;
   getHeartRateServiceState(): Promise<HeartRateState>;
   setHeartRateAutoReconnect(options: { enabled: boolean }): Promise<OpenAppCommandResult>;
+  consumeOpenAppIntent(): Promise<OpenAppIntentResult>;
   exportHeartRateHistory(options: {
-    format: "jsonl" | "csv";
+    format: HeartRateExportFormat;
     sinceMs?: number;
     untilMs?: number;
   }): Promise<HeartRateExportResult>;
+  getLastHeartRateExport(): Promise<HeartRateExportResult>;
+  shareHeartRateExport(options: {
+    format: HeartRateExportFormat;
+    target?: HeartRateShareTarget;
+  }): Promise<HeartRateExportResult>;
+  saveHeartRateExportToDownloads(options: { format: HeartRateExportFormat }): Promise<HeartRateExportResult>;
+  saveGitHubExportSettings(options: {
+    owner: string;
+    repo: string;
+    branch: string;
+    pathPrefix: string;
+    token?: string;
+  }): Promise<GitHubExportSettingsResult>;
+  getGitHubExportSettings(): Promise<GitHubExportSettingsResult>;
+  testGitHubExportSettings(): Promise<GitHubExportSettingsResult>;
+  uploadHeartRateExportToGitHub(options: {
+    format: HeartRateExportFormat;
+    path?: string;
+  }): Promise<GitHubUploadResult>;
   getHeartRateHistory(options?: { limit?: number; sinceMs?: number }): Promise<HeartRateHistoryResult>;
   clearHeartRateHistory(): Promise<OpenAppCommandResult>;
   addListener(

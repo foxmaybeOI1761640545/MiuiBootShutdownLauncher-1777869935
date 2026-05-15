@@ -43,12 +43,7 @@ object HeartRateNotification {
             stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val contentIntent = PendingIntent.getActivity(
-            context,
-            2,
-            Intent(context, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        val contentIntent = createOpenAppPendingIntent(context)
 
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
@@ -60,6 +55,26 @@ object HeartRateNotification {
             .setContentIntent(contentIntent)
             .addAction(0, "Stop Recording", stopPendingIntent)
             .build()
+    }
+
+    private fun createOpenAppPendingIntent(context: Context): PendingIntent {
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?: Intent(context, MainActivity::class.java)
+        intent.apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra("openPage", "run")
+            putExtra("fromNotification", true)
+        }
+
+        return PendingIntent.getActivity(
+            context,
+            2,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun contentText(state: JSObject): String {
