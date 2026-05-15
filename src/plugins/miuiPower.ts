@@ -1,4 +1,4 @@
-import { registerPlugin } from "@capacitor/core";
+import { registerPlugin, type PluginListenerHandle } from "@capacitor/core";
 
 export interface OpenBootShutdownResult {
   ok: boolean;
@@ -37,6 +37,73 @@ export interface DisplayRefreshRateResult {
   currentRefreshRate: number;
   roundedRefreshRate: number;
   supportedRefreshRates: number[];
+}
+
+export type HeartRateStatus =
+  | "idle"
+  | "permission_required"
+  | "bluetooth_off"
+  | "scanning"
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "error";
+
+export interface HeartRateDevice {
+  address: string;
+  name?: string;
+  rssi?: number;
+  lastSeenMs: number;
+  remembered: boolean;
+  heartRateServiceAdvertised: boolean;
+}
+
+export interface HeartRateSample {
+  timestampMs: number;
+  sessionId: string;
+  deviceAddress: string;
+  deviceName?: string;
+  bpm: number;
+  bpmFormat: "uint8" | "uint16";
+  rawHex: string;
+  flags: number;
+  sensorContactSupported: boolean;
+  sensorContactDetected: boolean | null;
+  energyExpended?: number | null;
+  rrIntervals?: number[];
+  rrIntervalsMs?: number[];
+  bodySensorLocation?: string | null;
+  batteryLevel?: number | null;
+}
+
+export interface HeartRateState {
+  status: HeartRateStatus;
+  device?: HeartRateDevice | null;
+  latestSample?: HeartRateSample | null;
+  sampleCount: number;
+  serviceRunning: boolean;
+  recording: boolean;
+  error?: string;
+  bodySensorLocation?: string;
+  batteryLevel?: number | null;
+}
+
+export interface HeartRatePermissionResult {
+  granted: boolean;
+  requiredPermissions: string[];
+}
+
+export interface HeartRateScanResult {
+  devices: HeartRateDevice[];
+  usedFallback?: boolean;
+}
+
+export interface LastHeartRateDeviceResult {
+  device?: HeartRateDevice | null;
+}
+
+export interface HeartRateHistoryResult {
+  samples: HeartRateSample[];
 }
 
 export interface ClipboardTextResult {
@@ -120,6 +187,28 @@ export interface MiuiPowerPlugin {
   openDisplaySettings(): Promise<OpenAppCommandResult>;
   getDisplayRefreshRate(): Promise<DisplayRefreshRateResult>;
   getClipboardText(): Promise<ClipboardTextResult>;
+  getHeartRateState(): Promise<HeartRateState>;
+  requestHeartRatePermissions(): Promise<HeartRatePermissionResult>;
+  scanHeartRateDevices(options: { durationMs?: number }): Promise<HeartRateScanResult>;
+  getLastHeartRateDevice(): Promise<LastHeartRateDeviceResult>;
+  connectHeartRateDevice(options: { address: string; name?: string }): Promise<OpenAppCommandResult>;
+  disconnectHeartRateDevice(): Promise<OpenAppCommandResult>;
+  startHeartRateRecording(): Promise<OpenAppCommandResult>;
+  stopHeartRateRecording(): Promise<OpenAppCommandResult>;
+  getHeartRateHistory(options?: { limit?: number; sinceMs?: number }): Promise<HeartRateHistoryResult>;
+  clearHeartRateHistory(): Promise<OpenAppCommandResult>;
+  addListener(
+    eventName: "heartRateStateChanged",
+    listenerFunc: (state: HeartRateState) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: "heartRateDeviceFound",
+    listenerFunc: (device: HeartRateDevice) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: "heartRateSample",
+    listenerFunc: (sample: HeartRateSample) => void,
+  ): Promise<PluginListenerHandle>;
   openHonorOfKings(): Promise<OpenHonorOfKingsResult>;
   openScreenTimePage(): Promise<OpenAppCommandResult>;
   openUsageAccessSettings(): Promise<OpenAppCommandResult>;

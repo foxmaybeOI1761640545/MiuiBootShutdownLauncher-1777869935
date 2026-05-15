@@ -6,7 +6,7 @@ export const LAUNCHER_UI_STATE_STORAGE_KEY = "launcher.ui-state.v1";
 export const LAUNCHER_UI_STATE_VERSION = 1 as const;
 
 export type ZonePageId = "page1" | "page2";
-export type RuntimePageId = ZonePageId | "game" | "settings";
+export type RuntimePageId = ZonePageId | "run" | "game" | "settings";
 export type Zone2Size = "small" | "large";
 export type ActionVariant = "pink" | "beige";
 export type CustomExecutorKind = "builtin_ref" | "custom_intent";
@@ -140,7 +140,9 @@ function normalizePageId(value: unknown, fallback: ZonePageId = "page2"): ZonePa
 }
 
 function normalizeRuntimePageId(value: unknown, fallback: RuntimePageId = "page1"): RuntimePageId {
-  return value === "page1" || value === "page2" || value === "game" || value === "settings" ? value : fallback;
+  return value === "page1" || value === "page2" || value === "run" || value === "game" || value === "settings"
+    ? value
+    : fallback;
 }
 
 function normalizeStartupPolicyMode(

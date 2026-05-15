@@ -41,7 +41,144 @@
           :data-page-id="activePage"
           @scroll.passive="onPageScroll"
         >
-          <template v-if="activePage === 'game'">
+          <template v-if="activePage === 'run'">
+            <section class="run-page" data-locate="run-page">
+              <article class="run-status-card">
+                <div>
+                  <p class="run-card-label">Status</p>
+                  <h2>{{ heartRateStatusLabel }}</h2>
+                </div>
+                <div class="run-status-grid">
+                  <span>Device</span>
+                  <strong>{{ heartRateDeviceName }}</strong>
+                  <span>Battery</span>
+                  <strong>{{ heartRateBatteryText }}</strong>
+                  <span>Samples</span>
+                  <strong>{{ heartRateState.sampleCount }}</strong>
+                </div>
+              </article>
+
+              <article class="run-bpm-card">
+                <p class="run-card-label">Heart Rate</p>
+                <div class="run-bpm-main">
+                  <span>{{ displayHeartRateBpm ?? "--" }}</span>
+                  <small>BPM</small>
+                </div>
+                <div class="run-sample-meta">
+                  <span>{{ latestHeartRateSample?.bpmFormat ?? "--" }}</span>
+                  <span>{{ formatHeartRateSampleTime(latestHeartRateSample) }}</span>
+                </div>
+              </article>
+
+              <article class="run-chart-card">
+                <svg viewBox="0 0 100 48" class="run-chart" aria-label="Heart-rate trend">
+                  <polyline
+                    v-if="heartRateTrendPolyline"
+                    :points="heartRateTrendPolyline"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="3"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </article>
+
+              <article class="run-controls-card">
+                <div class="settings-row-btns">
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="requestHeartRatePermissions">
+                    Permissions
+                  </button>
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="scanHeartRateDevices">
+                    Scan
+                  </button>
+                  <button
+                    type="button"
+                    class="mini-btn"
+                    :disabled="isLoading || !lastHeartRateDevice"
+                    @click="connectLastHeartRateDeviceFromButton"
+                  >
+                    Last
+                  </button>
+                  <button
+                    type="button"
+                    class="mini-btn mini-btn-danger"
+                    :disabled="isLoading || heartRateState.status !== 'connected'"
+                    @click="disconnectHeartRateDevice"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+
+                <div v-if="heartRateDevices.length > 0" class="run-device-list">
+                  <button
+                    v-for="device in heartRateDevices"
+                    :key="device.address"
+                    type="button"
+                    class="run-device-btn"
+                    :disabled="isLoading"
+                    @click="connectHeartRateDevice(device)"
+                  >
+                    <span>{{ device.name || device.address }}</span>
+                    <small>{{ device.rssi ?? "--" }} dBm</small>
+                  </button>
+                </div>
+              </article>
+
+              <article class="run-data-card">
+                <div class="run-data-grid">
+                  <span>rawHex</span>
+                  <strong>{{ latestHeartRateSample?.rawHex || "--" }}</strong>
+                  <span>flags</span>
+                  <strong>{{ latestHeartRateSample?.flags ?? "--" }}</strong>
+                  <span>RR ms</span>
+                  <strong>{{ formatHeartRateRr(latestHeartRateSample) }}</strong>
+                  <span>Sensor</span>
+                  <strong>{{ latestHeartRateSample?.bodySensorLocation || heartRateState.bodySensorLocation || "--" }}</strong>
+                </div>
+              </article>
+
+              <article class="run-history-card">
+                <div class="run-history-head">
+                  <div>
+                    <p class="run-card-label">Local JSONL</p>
+                    <strong>{{ heartRateHistoryCount }} rows</strong>
+                  </div>
+                  <div class="settings-row-btns">
+                    <button
+                      type="button"
+                      class="mini-btn"
+                      :disabled="isLoading || heartRateState.recording || heartRateState.status !== 'connected'"
+                      @click="startHeartRateRecording"
+                    >
+                      Start
+                    </button>
+                    <button
+                      type="button"
+                      class="mini-btn"
+                      :disabled="isLoading || !heartRateState.recording"
+                      @click="stopHeartRateRecording"
+                    >
+                      Stop
+                    </button>
+                    <button type="button" class="mini-btn mini-btn-danger" :disabled="isLoading" @click="clearHeartRateHistory">
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div v-if="heartRateHistory.length > 0" class="run-history-list">
+                  <div v-for="sample in heartRateHistory.slice(-5).reverse()" :key="`${sample.timestampMs}-${sample.rawHex}`">
+                    <span>{{ formatHeartRateSampleTime(sample) }}</span>
+                    <strong>{{ sample.bpm }} BPM</strong>
+                  </div>
+                </div>
+              </article>
+
+              <p v-if="heartRateState.error" class="game-refresh-error">{{ heartRateState.error }}</p>
+            </section>
+          </template>
+
+          <template v-else-if="activePage === 'game'">
             <section class="game-page" data-locate="game-page">
               <article class="game-refresh-card" :class="[`state-${refreshStatus}`]">
                 <p class="game-refresh-label">当前屏幕刷新率</p>
@@ -124,6 +261,7 @@
                           >
                             <option value="page1">Page 1</option>
                             <option value="page2">Page 2</option>
+                            <option value="run">Run</option>
                             <option value="game">Game</option>
                             <option value="settings">Settings</option>
                           </select>
@@ -478,6 +616,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import {
   type ClipboardTextResult,
   type DisplayRefreshRateResult,
+  type HeartRateDevice,
+  type HeartRateSample,
+  type HeartRateState,
   type LaunchIntentOptions,
   type OpenAppCommandResult,
   type LaunchIntentExtraValue,
@@ -512,6 +653,7 @@ import page3ActiveIcon from "./assets/nav-page-3-active.svg";
 import gameIcon from "./assets/nav-game.svg";
 import gameDarkIcon from "./assets/nav-game-dark.svg";
 import gameActiveIcon from "./assets/nav-game-active.svg";
+import runIcon from "../temp/run.svg";
 
 type RuntimePageId = LauncherRuntimePageId;
 type ActionVariant = "pink" | "beige";
@@ -669,6 +811,7 @@ const searchKeyword = ref("");
 const pageScrollTopByPage = ref<Record<RuntimePageId, number>>({
   page1: 0,
   page2: 0,
+  run: 0,
   game: 0,
   settings: 0,
 });
@@ -692,13 +835,56 @@ const launchConfirm = reactive<LaunchConfirmState>({
   roundedRefreshRate: null,
   errorText: "",
 });
+const heartRateState = ref<HeartRateState>({
+  status: "idle",
+  device: null,
+  latestSample: null,
+  sampleCount: 0,
+  serviceRunning: false,
+  recording: false,
+  error: "",
+  bodySensorLocation: "",
+  batteryLevel: null,
+});
+const heartRateDevices = ref<HeartRateDevice[]>([]);
+const lastHeartRateDevice = ref<HeartRateDevice | null>(null);
+const heartRateHistory = ref<HeartRateSample[]>([]);
+const liveHeartRateSamples = ref<HeartRateSample[]>([]);
 let refreshRatePollTimer: number | null = null;
 let isReadingRefreshRate = false;
 let appPauseListenerHandle: CapacitorAppListenerHandle | null = null;
 let appResumeListenerHandle: CapacitorAppListenerHandle | null = null;
+let heartRateStateListenerHandle: CapacitorAppListenerHandle | null = null;
+let heartRateDeviceListenerHandle: CapacitorAppListenerHandle | null = null;
+let heartRateSampleListenerHandle: CapacitorAppListenerHandle | null = null;
 
 const isLoading = computed(() => loadingAction.value !== "");
 const displayMessage = computed(() => message.value || "Waiting for action. Tap any entry button.");
+const latestHeartRateSample = computed(() => heartRateState.value.latestSample ?? null);
+const displayHeartRateBpm = computed(() => latestHeartRateSample.value?.bpm ?? null);
+const heartRateStatusLabel = computed(() => {
+  const labels: Record<HeartRateState["status"], string> = {
+    idle: "Idle",
+    permission_required: "Permission required",
+    bluetooth_off: "Bluetooth off",
+    scanning: "Scanning",
+    connecting: "Connecting",
+    connected: heartRateState.value.recording ? "Recording" : "Connected",
+    disconnected: "Disconnected",
+    error: "Error",
+  };
+  return labels[heartRateState.value.status] ?? heartRateState.value.status;
+});
+const heartRateDeviceName = computed(() => {
+  const device = heartRateState.value.device ?? lastHeartRateDevice.value;
+  return device?.name || device?.address || "No device";
+});
+const heartRateBatteryText = computed(() => {
+  const level = latestHeartRateSample.value?.batteryLevel ?? heartRateState.value.batteryLevel;
+  return typeof level === "number" ? `${level}%` : "--";
+});
+const heartRateHistoryCount = computed(() => heartRateHistory.value.length);
+const heartRateTrendPolyline = computed(() => buildHeartRateTrendPolyline(liveHeartRateSamples.value.slice(-60)));
 const launchConfirmTitle = computed(() =>
   launchConfirm.reason === "low_refresh_rate" ? "当前为 60Hz，建议先调整刷新率" : "刷新率检测失败",
 );
@@ -777,6 +963,186 @@ async function runWithLoading(key: string, fallbackMessage: string, task: () => 
   } finally {
     loadingAction.value = "";
   }
+}
+
+function normalizeHeartRateState(raw: HeartRateState): HeartRateState {
+  return {
+    status: raw.status ?? "idle",
+    device: raw.device ?? null,
+    latestSample: raw.latestSample ?? null,
+    sampleCount: Number(raw.sampleCount ?? 0),
+    serviceRunning: Boolean(raw.serviceRunning),
+    recording: Boolean(raw.recording),
+    error: raw.error ?? "",
+    bodySensorLocation: raw.bodySensorLocation ?? "",
+    batteryLevel: typeof raw.batteryLevel === "number" ? raw.batteryLevel : null,
+  };
+}
+
+function applyHeartRateState(raw: HeartRateState) {
+  heartRateState.value = normalizeHeartRateState(raw);
+  const sample = heartRateState.value.latestSample;
+  if (sample) {
+    pushLiveHeartRateSample(sample);
+  }
+}
+
+function pushLiveHeartRateSample(sample: HeartRateSample) {
+  const previous = liveHeartRateSamples.value[liveHeartRateSamples.value.length - 1];
+  if (previous?.timestampMs === sample.timestampMs && previous.rawHex === sample.rawHex) {
+    return;
+  }
+  liveHeartRateSamples.value = [...liveHeartRateSamples.value, sample].slice(-240);
+}
+
+function upsertHeartRateDevice(device: HeartRateDevice) {
+  const next = heartRateDevices.value.filter((item) => item.address !== device.address);
+  next.push(device);
+  heartRateDevices.value = next.sort((left, right) => {
+    const leftRemembered = left.remembered ? 1 : 0;
+    const rightRemembered = right.remembered ? 1 : 0;
+    if (leftRemembered !== rightRemembered) {
+      return rightRemembered - leftRemembered;
+    }
+    return (right.rssi ?? -999) - (left.rssi ?? -999);
+  });
+}
+
+function buildHeartRateTrendPolyline(samples: HeartRateSample[]) {
+  const values = samples
+    .map((sample) => sample.bpm)
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (values.length === 0) {
+    return "";
+  }
+  const min = Math.min(...values, 50);
+  const max = Math.max(...values, 150);
+  const range = Math.max(1, max - min);
+  return values
+    .map((value, index) => {
+      const x = values.length === 1 ? 100 : (index / (values.length - 1)) * 100;
+      const y = 44 - ((value - min) / range) * 36;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+function formatHeartRateSampleTime(sample: HeartRateSample | null) {
+  if (!sample) {
+    return "--";
+  }
+  return new Date(sample.timestampMs).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function formatHeartRateRr(sample: HeartRateSample | null) {
+  const values = sample?.rrIntervalsMs ?? [];
+  return values.length > 0 ? values.join(", ") : "--";
+}
+
+async function refreshHeartRateState() {
+  try {
+    applyHeartRateState(await MiuiPower.getHeartRateState());
+  } catch {
+    // Native plugin may be unavailable in browser preview.
+  }
+}
+
+async function refreshHeartRateHistory() {
+  try {
+    const result = await MiuiPower.getHeartRateHistory({ limit: 80 });
+    heartRateHistory.value = result.samples ?? [];
+  } catch {
+    heartRateHistory.value = [];
+  }
+}
+
+async function refreshLastHeartRateDevice() {
+  try {
+    const result = await MiuiPower.getLastHeartRateDevice();
+    lastHeartRateDevice.value = result.device ?? null;
+  } catch {
+    lastHeartRateDevice.value = null;
+  }
+}
+
+async function requestHeartRatePermissions() {
+  await runWithLoading("heartRatePermissions", "Heart-rate permission request failed", async () => {
+    const result = await MiuiPower.requestHeartRatePermissions();
+    await refreshHeartRateState();
+    return result.granted ? "Heart-rate permissions granted." : "Heart-rate permissions are still required.";
+  });
+}
+
+async function scanHeartRateDevices() {
+  await runWithLoading("heartRateScan", "Heart-rate scan failed", async () => {
+    heartRateDevices.value = [];
+    const result = await MiuiPower.scanHeartRateDevices({ durationMs: 8_000 });
+    heartRateDevices.value = [...(result.devices ?? [])];
+    await refreshHeartRateState();
+    return result.devices.length > 0
+      ? `Found ${result.devices.length} BLE device${result.devices.length === 1 ? "" : "s"}.`
+      : "No BLE device found.";
+  });
+}
+
+async function connectHeartRateDevice(device: HeartRateDevice) {
+  await runWithLoading("heartRateConnect", "Heart-rate connect failed", async () => {
+    const result = await MiuiPower.connectHeartRateDevice({
+      address: device.address,
+      name: device.name,
+    });
+    await refreshLastHeartRateDevice();
+    await refreshHeartRateState();
+    return result.ok ? `Connecting ${device.name || device.address}.` : formatOpenResult("Heart-rate connect", result);
+  });
+}
+
+async function connectLastHeartRateDeviceFromButton() {
+  const device = lastHeartRateDevice.value;
+  if (!device) {
+    message.value = "No last heart-rate device.";
+    return;
+  }
+  await connectHeartRateDevice(device);
+}
+
+async function disconnectHeartRateDevice() {
+  await runWithLoading("heartRateDisconnect", "Heart-rate disconnect failed", async () => {
+    const result = await MiuiPower.disconnectHeartRateDevice();
+    await refreshHeartRateState();
+    return result.ok ? "Heart-rate device disconnected." : formatOpenResult("Heart-rate disconnect", result);
+  });
+}
+
+async function startHeartRateRecording() {
+  await runWithLoading("heartRateRecordStart", "Heart-rate recording failed", async () => {
+    const result = await MiuiPower.startHeartRateRecording();
+    await refreshHeartRateState();
+    await refreshHeartRateHistory();
+    return result.ok ? "Heart-rate JSONL recording started." : formatOpenResult("Heart-rate recording", result);
+  });
+}
+
+async function stopHeartRateRecording() {
+  await runWithLoading("heartRateRecordStop", "Heart-rate recording stop failed", async () => {
+    const result = await MiuiPower.stopHeartRateRecording();
+    await refreshHeartRateState();
+    await refreshHeartRateHistory();
+    return result.ok ? "Heart-rate JSONL recording stopped." : formatOpenResult("Heart-rate recording", result);
+  });
+}
+
+async function clearHeartRateHistory() {
+  await runWithLoading("heartRateClear", "Heart-rate history clear failed", async () => {
+    const result = await MiuiPower.clearHeartRateHistory();
+    heartRateHistory.value = [];
+    await refreshHeartRateState();
+    return result.ok ? "Heart-rate history cleared." : formatOpenResult("Heart-rate history", result);
+  });
 }
 
 function getCapacitorAppPlugin(): CapacitorAppPluginLike | null {
@@ -1716,6 +2082,7 @@ const isDraftDirty = computed(
 const navItemMeta: Array<{ id: RuntimePageId; label: string }> = [
   { id: "page1", label: "Page 1" },
   { id: "page2", label: "Page 2" },
+  { id: "run", label: "Run" },
   { id: "game", label: "Game" },
   { id: "settings", label: "Settings" },
 ];
@@ -1727,6 +2094,9 @@ const navIconByPage: Record<RuntimePageId, NavIconVariants> = {
   },
   page2: {
     defaultIcon: page2Icon,
+  },
+  run: {
+    defaultIcon: runIcon,
   },
   game: {
     defaultIcon: gameIcon,
@@ -1765,7 +2135,7 @@ const settingsGroups: SettingsGroupDefinition[] = [
   { id: "settings-groups", title: "分组管理", locateKey: "settings-groups", collapsedByDefault: true },
   { id: "settings-custom", title: "自定义按钮", locateKey: "settings-custom", collapsedByDefault: true },
 ];
-const pageOrder: RuntimePageId[] = ["page1", "page2", "game", "settings"];
+const pageOrder: RuntimePageId[] = ["page1", "page2", "run", "game", "settings"];
 
 function resolveStartupPage(config: LauncherConfigV3, state: LauncherUiState): RuntimePageId {
   return config.startupPolicy.mode === "remember" ? state.lastActivePage : config.startupPolicy.fixedPageId;
@@ -1850,7 +2220,7 @@ watch(themeMode, (mode) => {
 });
 
 function toggleRuntimeGroup(pageId: RuntimePageId, groupId: string) {
-  if (pageId === "settings" || pageId === "game") {
+  if (pageId !== "page1" && pageId !== "page2") {
     return;
   }
   const key = runtimeGroupStateKey(pageId, groupId);
@@ -1862,7 +2232,7 @@ function toggleRuntimeGroup(pageId: RuntimePageId, groupId: string) {
 }
 
 function setRuntimeGroupCollapsed(pageId: RuntimePageId, groupId: string, collapsed: boolean) {
-  if (pageId === "settings" || pageId === "game") {
+  if (pageId !== "page1" && pageId !== "page2") {
     return;
   }
   collapsedGroupMap.value = {
@@ -1872,7 +2242,7 @@ function setRuntimeGroupCollapsed(pageId: RuntimePageId, groupId: string, collap
 }
 
 function isRuntimeGroupCollapsed(pageId: RuntimePageId, groupId: string) {
-  if (pageId === "settings" || pageId === "game") {
+  if (pageId !== "page1" && pageId !== "page2") {
     return false;
   }
   return collapsedGroupMap.value[runtimeGroupStateKey(pageId, groupId)] ?? false;
@@ -2138,11 +2508,58 @@ async function setupCapacitorAppListeners() {
   }
 }
 
+async function teardownHeartRateListeners() {
+  try {
+    if (heartRateStateListenerHandle) {
+      await heartRateStateListenerHandle.remove();
+      heartRateStateListenerHandle = null;
+    }
+    if (heartRateDeviceListenerHandle) {
+      await heartRateDeviceListenerHandle.remove();
+      heartRateDeviceListenerHandle = null;
+    }
+    if (heartRateSampleListenerHandle) {
+      await heartRateSampleListenerHandle.remove();
+      heartRateSampleListenerHandle = null;
+    }
+  } catch {
+    heartRateStateListenerHandle = null;
+    heartRateDeviceListenerHandle = null;
+    heartRateSampleListenerHandle = null;
+  }
+}
+
+async function setupHeartRateListeners() {
+  try {
+    await teardownHeartRateListeners();
+    heartRateStateListenerHandle = await MiuiPower.addListener("heartRateStateChanged", (state) => {
+      applyHeartRateState(state);
+    });
+    heartRateDeviceListenerHandle = await MiuiPower.addListener("heartRateDeviceFound", (device) => {
+      upsertHeartRateDevice(device);
+    });
+    heartRateSampleListenerHandle = await MiuiPower.addListener("heartRateSample", (sample) => {
+      pushLiveHeartRateSample(sample);
+      if (heartRateState.value.recording) {
+        heartRateHistory.value = [...heartRateHistory.value, sample].slice(-80);
+      }
+    });
+  } catch {
+    heartRateStateListenerHandle = null;
+    heartRateDeviceListenerHandle = null;
+    heartRateSampleListenerHandle = null;
+  }
+}
+
 onMounted(() => {
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", handleVisibilityChange);
   }
   void setupCapacitorAppListeners();
+  void setupHeartRateListeners();
+  void refreshHeartRateState();
+  void refreshLastHeartRateDevice();
+  void refreshHeartRateHistory();
   if (shouldRunRefreshRatePolling()) {
     startRefreshRatePolling();
   }
@@ -2155,6 +2572,7 @@ onBeforeUnmount(() => {
     document.removeEventListener("visibilitychange", handleVisibilityChange);
   }
   void teardownCapacitorAppListeners();
+  void teardownHeartRateListeners();
   if (highlightTimer !== null) {
     window.clearTimeout(highlightTimer);
     highlightTimer = null;
@@ -2171,7 +2589,7 @@ const runtimeGroupsByPage = computed<Record<ZonePageId, Zone2Group[]>>(() => ({
 }));
 
 function runtimeGroupsForPage(pageId: RuntimePageId): Zone2Group[] {
-  if (pageId === "settings" || pageId === "game") {
+  if (pageId !== "page1" && pageId !== "page2") {
     return [];
   }
   return runtimeGroupsByPage.value[pageId];
@@ -2370,6 +2788,14 @@ function locateInContainer(container: HTMLElement | null, locateKey: string) {
 }
 
 const searchSettingItems: SearchResultItem[] = [
+  {
+    id: "run-page",
+    pageId: "run",
+    locateKey: "run-page",
+    label: "Run",
+    hint: "Heart Rate",
+    keywords: ["run", "heart", "rate", "bpm", "ble"],
+  },
   {
     id: "settings-save",
     pageId: "settings",

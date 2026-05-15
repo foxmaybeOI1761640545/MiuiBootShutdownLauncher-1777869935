@@ -1,29 +1,56 @@
 package com.example.miuipower
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import androidx.core.content.ContextCompat
+import com.example.miuipower.heartrate.HeartRateBleManager
+import com.example.miuipower.heartrate.HeartRateStorage
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
 import kotlin.concurrent.thread
 import kotlin.math.roundToInt
 
-@CapacitorPlugin(name = "MiuiPower")
+@CapacitorPlugin(
+    name = "MiuiPower",
+    permissions = [
+        Permission(strings = [Manifest.permission.BLUETOOTH_SCAN], alias = "heartRateScan"),
+        Permission(strings = [Manifest.permission.BLUETOOTH_CONNECT], alias = "heartRateConnect"),
+        Permission(strings = [Manifest.permission.ACCESS_FINE_LOCATION], alias = "heartRateLocation"),
+    ],
+)
 class MiuiPowerPlugin : Plugin() {
+
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+    private val heartRateManager by lazy {
+        HeartRateBleManager(
+            context = context,
+            storage = HeartRateStorage(context.filesDir),
+        ) { eventName, data, retain ->
+            mainHandler.post {
+                notifyListeners(eventName, data, retain)
+            }
+        }
+    }
 
     companion object {
         private const val TAG = "MiuiPowerPlugin"
@@ -250,6 +277,100 @@ class MiuiPowerPlugin : Plugin() {
             Log.w(TAG, "Read clipboard text failed", e)
             call.resolve(clipboardTextResult(false, false, error = e.message ?: e.javaClass.simpleName))
         }
+    }
+
+    @PluginMethod
+    fun getHeartRateState(call: PluginCall) {
+        call.resolve(heartRateManager.getStateJson())
+    }
+
+    @PluginMethod
+    fun requestHeartRatePermissions(call: PluginCall) {
+        if (hasHeartRatePermissions()) {
+            call.resolve(heartRatePermissionResult(true))
+            return
+        }
+        requestPermissionForAliases(requiredHeartRatePermissionAliases(), call, "heartRatePermissionsCallback")
+    }
+
+    @PermissionCallback
+    private fun heartRatePermissionsCallback(call: PluginCall) {
+        call.resolve(heartRatePermissionResult(hasHeartRatePermissions()))
+    }
+
+    @PluginMethod
+    fun scanHeartRateDevices(call: PluginCall) {
+        if (!hasHeartRatePermissions()) {
+            call.resolve(heartRatePermissionResult(false).apply {
+                put("devices", JSArray())
+                put("state", heartRateManager.getStateJson())
+            })
+            return
+        }
+
+        val durationMs = call.getLong("durationMs") ?: 8_000L
+        heartRateManager.scan(durationMs) { result ->
+            mainHandler.post { call.resolve(result) }
+        }
+    }
+
+    @PluginMethod
+    fun getLastHeartRateDevice(call: PluginCall) {
+        call.resolve(heartRateManager.getLastDeviceJson())
+    }
+
+    @PluginMethod
+    fun connectHeartRateDevice(call: PluginCall) {
+        if (!hasHeartRatePermissions()) {
+            call.resolve(heartRatePermissionResult(false).apply {
+                put("state", heartRateManager.getStateJson())
+            })
+            return
+        }
+
+        val address = call.getString("address")
+        val name = call.getString("name")
+        if (address.isNullOrBlank()) {
+            call.resolve(result(false, "invalid_args"))
+            return
+        }
+
+        heartRateManager.connect(address, name) { result ->
+            mainHandler.post { call.resolve(result) }
+        }
+    }
+
+    @PluginMethod
+    fun disconnectHeartRateDevice(call: PluginCall) {
+        heartRateManager.disconnect { result ->
+            mainHandler.post { call.resolve(result) }
+        }
+    }
+
+    @PluginMethod
+    fun startHeartRateRecording(call: PluginCall) {
+        heartRateManager.startRecording { result ->
+            mainHandler.post { call.resolve(result) }
+        }
+    }
+
+    @PluginMethod
+    fun stopHeartRateRecording(call: PluginCall) {
+        heartRateManager.stopRecording { result ->
+            mainHandler.post { call.resolve(result) }
+        }
+    }
+
+    @PluginMethod
+    fun getHeartRateHistory(call: PluginCall) {
+        val limit = call.getInt("limit") ?: 200
+        val sinceMs = call.getLong("sinceMs")
+        call.resolve(heartRateManager.readHistory(limit, sinceMs))
+    }
+
+    @PluginMethod
+    fun clearHeartRateHistory(call: PluginCall) {
+        call.resolve(heartRateManager.clearHistory())
     }
 
     @PluginMethod
@@ -1315,6 +1436,35 @@ class MiuiPowerPlugin : Plugin() {
         } catch (e: Exception) {
             Log.w(TAG, "Overlay permission settings launch failed", e)
             false
+        }
+    }
+
+    private fun requiredHeartRatePermissionAliases(): Array<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf("heartRateScan", "heartRateConnect")
+        } else {
+            arrayOf("heartRateLocation")
+        }
+    }
+
+    private fun requiredHeartRatePermissionStrings(): List<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+    private fun hasHeartRatePermissions(): Boolean {
+        return requiredHeartRatePermissionStrings().all { permission ->
+            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun heartRatePermissionResult(granted: Boolean): JSObject {
+        return JSObject().apply {
+            put("granted", granted)
+            put("requiredPermissions", JSArray(requiredHeartRatePermissionStrings()))
         }
     }
 
