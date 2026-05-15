@@ -653,7 +653,7 @@ import page3ActiveIcon from "./assets/nav-page-3-active.svg";
 import gameIcon from "./assets/nav-game.svg";
 import gameDarkIcon from "./assets/nav-game-dark.svg";
 import gameActiveIcon from "./assets/nav-game-active.svg";
-import runIcon from "../temp/run.svg";
+import runIcon from "./assets/nav-run.svg";
 
 type RuntimePageId = LauncherRuntimePageId;
 type ActionVariant = "pink" | "beige";
