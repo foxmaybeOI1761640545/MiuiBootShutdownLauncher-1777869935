@@ -601,6 +601,13 @@ html {
   color: var(--text-muted);
 }
 
+.run-export-note {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  word-break: break-word;
+}
+
 .run-history-list {
   margin-top: 10px;
   display: grid;

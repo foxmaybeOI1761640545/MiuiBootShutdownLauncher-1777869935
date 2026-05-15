@@ -41,4 +41,13 @@ class HeartRateMeasurementParserTest {
 
         assertNull(result)
     }
+
+    @Test
+    fun reconnectPolicyCapsAtTenSeconds() {
+        assertEquals(1_000L, HeartRateReconnectPolicy.delayForAttempt(0))
+        assertEquals(3_000L, HeartRateReconnectPolicy.delayForAttempt(1))
+        assertEquals(5_000L, HeartRateReconnectPolicy.delayForAttempt(2))
+        assertEquals(10_000L, HeartRateReconnectPolicy.delayForAttempt(3))
+        assertEquals(10_000L, HeartRateReconnectPolicy.delayForAttempt(12))
+    }
 }

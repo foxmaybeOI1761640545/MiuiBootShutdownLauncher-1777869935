@@ -55,6 +55,10 @@
                   <strong>{{ heartRateBatteryText }}</strong>
                   <span>Samples</span>
                   <strong>{{ heartRateState.sampleCount }}</strong>
+                  <span>Service</span>
+                  <strong>{{ heartRateServiceText }}</strong>
+                  <span>Reconnect</span>
+                  <strong>{{ heartRateReconnectText }}</strong>
                 </div>
               </article>
 
@@ -103,10 +107,13 @@
                   <button
                     type="button"
                     class="mini-btn mini-btn-danger"
-                    :disabled="isLoading || heartRateState.status !== 'connected'"
+                    :disabled="isLoading || (!heartRateState.device && !heartRateState.recording)"
                     @click="disconnectHeartRateDevice"
                   >
                     Disconnect
+                  </button>
+                  <button type="button" class="mini-btn" :disabled="isLoading" @click="toggleHeartRateAutoReconnect">
+                    {{ heartRateReconnectButtonLabel }}
                   </button>
                 </div>
 
@@ -120,7 +127,7 @@
                     @click="connectHeartRateDevice(device)"
                   >
                     <span>{{ device.name || device.address }}</span>
-                    <small>{{ device.rssi ?? "--" }} dBm</small>
+                    <small>{{ device.heartRateServiceAdvertised ? "HR" : "BLE" }} · {{ device.rssi ?? "--" }} dBm</small>
                   </button>
                 </div>
               </article>
@@ -130,7 +137,7 @@
                   <span>rawHex</span>
                   <strong>{{ latestHeartRateSample?.rawHex || "--" }}</strong>
                   <span>flags</span>
-                  <strong>{{ latestHeartRateSample?.flags ?? "--" }}</strong>
+                  <strong>{{ formatHeartRateFlags(latestHeartRateSample) }}</strong>
                   <span>RR ms</span>
                   <strong>{{ formatHeartRateRr(latestHeartRateSample) }}</strong>
                   <span>Sensor</span>
@@ -148,10 +155,10 @@
                     <button
                       type="button"
                       class="mini-btn"
-                      :disabled="isLoading || heartRateState.recording || heartRateState.status !== 'connected'"
+                      :disabled="isLoading || heartRateState.recording || !hasHeartRateStartTarget"
                       @click="startHeartRateRecording"
                     >
-                      Start
+                      Start Service
                     </button>
                     <button
                       type="button"
@@ -159,7 +166,13 @@
                       :disabled="isLoading || !heartRateState.recording"
                       @click="stopHeartRateRecording"
                     >
-                      Stop
+                      Stop Service
+                    </button>
+                    <button type="button" class="mini-btn" :disabled="isLoading" @click="exportHeartRateHistory('csv')">
+                      CSV
+                    </button>
+                    <button type="button" class="mini-btn" :disabled="isLoading" @click="exportHeartRateHistory('jsonl')">
+                      JSONL
                     </button>
                     <button type="button" class="mini-btn mini-btn-danger" :disabled="isLoading" @click="clearHeartRateHistory">
                       Clear
@@ -172,6 +185,7 @@
                     <strong>{{ sample.bpm }} BPM</strong>
                   </div>
                 </div>
+                <p v-if="heartRateExportText" class="run-export-note">{{ heartRateExportText }}</p>
               </article>
 
               <p v-if="heartRateState.error" class="game-refresh-error">{{ heartRateState.error }}</p>
@@ -841,7 +855,12 @@ const heartRateState = ref<HeartRateState>({
   latestSample: null,
   sampleCount: 0,
   serviceRunning: false,
+  foregroundNotificationVisible: false,
+  autoReconnectEnabled: true,
+  reconnectAttempt: 0,
+  nextReconnectDelayMs: null,
   recording: false,
+  sessionId: null,
   error: "",
   bodySensorLocation: "",
   batteryLevel: null,
@@ -850,6 +869,7 @@ const heartRateDevices = ref<HeartRateDevice[]>([]);
 const lastHeartRateDevice = ref<HeartRateDevice | null>(null);
 const heartRateHistory = ref<HeartRateSample[]>([]);
 const liveHeartRateSamples = ref<HeartRateSample[]>([]);
+const heartRateExportText = ref("");
 let refreshRatePollTimer: number | null = null;
 let isReadingRefreshRate = false;
 let appPauseListenerHandle: CapacitorAppListenerHandle | null = null;
@@ -870,7 +890,10 @@ const heartRateStatusLabel = computed(() => {
     scanning: "Scanning",
     connecting: "Connecting",
     connected: heartRateState.value.recording ? "Recording" : "Connected",
+    recording: "Recording",
+    reconnecting: "Reconnecting",
     disconnected: "Disconnected",
+    stopping: "Stopping",
     error: "Error",
   };
   return labels[heartRateState.value.status] ?? heartRateState.value.status;
@@ -885,6 +908,27 @@ const heartRateBatteryText = computed(() => {
 });
 const heartRateHistoryCount = computed(() => heartRateHistory.value.length);
 const heartRateTrendPolyline = computed(() => buildHeartRateTrendPolyline(liveHeartRateSamples.value.slice(-60)));
+const heartRateServiceText = computed(() => {
+  if (!heartRateState.value.serviceRunning) {
+    return "Off";
+  }
+  return heartRateState.value.foregroundNotificationVisible ? "Foreground" : "Starting";
+});
+const heartRateReconnectText = computed(() => {
+  if (!heartRateState.value.autoReconnectEnabled) {
+    return "Off";
+  }
+  const delay = heartRateState.value.nextReconnectDelayMs;
+  if (typeof delay === "number" && delay > 0) {
+    return `Waiting ${Math.ceil(delay / 1000)}s`;
+  }
+  const attempt = heartRateState.value.reconnectAttempt ?? 0;
+  return attempt > 0 ? `Attempt ${attempt}` : "Ready";
+});
+const heartRateReconnectButtonLabel = computed(() =>
+  heartRateState.value.autoReconnectEnabled === false ? "Reconnect Off" : "Reconnect On",
+);
+const hasHeartRateStartTarget = computed(() => Boolean(heartRateState.value.device || lastHeartRateDevice.value));
 const launchConfirmTitle = computed(() =>
   launchConfirm.reason === "low_refresh_rate" ? "当前为 60Hz，建议先调整刷新率" : "刷新率检测失败",
 );
@@ -972,7 +1016,12 @@ function normalizeHeartRateState(raw: HeartRateState): HeartRateState {
     latestSample: raw.latestSample ?? null,
     sampleCount: Number(raw.sampleCount ?? 0),
     serviceRunning: Boolean(raw.serviceRunning),
+    foregroundNotificationVisible: Boolean(raw.foregroundNotificationVisible),
+    autoReconnectEnabled: raw.autoReconnectEnabled !== false,
+    reconnectAttempt: Number(raw.reconnectAttempt ?? 0),
+    nextReconnectDelayMs: typeof raw.nextReconnectDelayMs === "number" ? raw.nextReconnectDelayMs : null,
     recording: Boolean(raw.recording),
+    sessionId: raw.sessionId ?? null,
     error: raw.error ?? "",
     bodySensorLocation: raw.bodySensorLocation ?? "",
     batteryLevel: typeof raw.batteryLevel === "number" ? raw.batteryLevel : null,
@@ -1043,6 +1092,13 @@ function formatHeartRateRr(sample: HeartRateSample | null) {
   return values.length > 0 ? values.join(", ") : "--";
 }
 
+function formatHeartRateFlags(sample: HeartRateSample | null) {
+  if (!sample || typeof sample.flags !== "number") {
+    return "--";
+  }
+  return `0x${sample.flags.toString(16).toUpperCase().padStart(2, "0")} / ${sample.flags}`;
+}
+
 async function refreshHeartRateState() {
   try {
     applyHeartRateState(await MiuiPower.getHeartRateState());
@@ -1073,6 +1129,12 @@ async function requestHeartRatePermissions() {
   await runWithLoading("heartRatePermissions", "Heart-rate permission request failed", async () => {
     const result = await MiuiPower.requestHeartRatePermissions();
     await refreshHeartRateState();
+    if (result.bleGranted === false) {
+      return "Bluetooth permission is required for heart-rate devices.";
+    }
+    if (result.notificationGranted === false) {
+      return "Notification permission is required before background recording can start.";
+    }
     return result.granted ? "Heart-rate permissions granted." : "Heart-rate permissions are still required.";
   });
 }
@@ -1114,7 +1176,11 @@ async function disconnectHeartRateDevice() {
   await runWithLoading("heartRateDisconnect", "Heart-rate disconnect failed", async () => {
     const result = await MiuiPower.disconnectHeartRateDevice();
     await refreshHeartRateState();
-    return result.ok ? "Heart-rate device disconnected." : formatOpenResult("Heart-rate disconnect", result);
+    return result.ok
+      ? heartRateState.value.recording
+        ? "Heart-rate recording stop requested."
+        : "Heart-rate device disconnected."
+      : formatOpenResult("Heart-rate disconnect", result);
   });
 }
 
@@ -1123,7 +1189,7 @@ async function startHeartRateRecording() {
     const result = await MiuiPower.startHeartRateRecording();
     await refreshHeartRateState();
     await refreshHeartRateHistory();
-    return result.ok ? "Heart-rate JSONL recording started." : formatOpenResult("Heart-rate recording", result);
+    return result.ok ? "Heart-rate foreground recording starting." : formatOpenResult("Heart-rate recording", result);
   });
 }
 
@@ -1132,7 +1198,29 @@ async function stopHeartRateRecording() {
     const result = await MiuiPower.stopHeartRateRecording();
     await refreshHeartRateState();
     await refreshHeartRateHistory();
-    return result.ok ? "Heart-rate JSONL recording stopped." : formatOpenResult("Heart-rate recording", result);
+    return result.ok ? "Heart-rate foreground recording stop requested." : formatOpenResult("Heart-rate recording", result);
+  });
+}
+
+async function toggleHeartRateAutoReconnect() {
+  await runWithLoading("heartRateReconnect", "Heart-rate reconnect setting failed", async () => {
+    const enabled = heartRateState.value.autoReconnectEnabled === false;
+    const result = await MiuiPower.setHeartRateAutoReconnect({ enabled });
+    await refreshHeartRateState();
+    return result.ok
+      ? `Heart-rate auto reconnect ${enabled ? "enabled" : "disabled"}.`
+      : formatOpenResult("Heart-rate reconnect", result);
+  });
+}
+
+async function exportHeartRateHistory(format: "jsonl" | "csv") {
+  await runWithLoading(`heartRateExport${format}`, "Heart-rate export failed", async () => {
+    const result = await MiuiPower.exportHeartRateHistory({ format });
+    if (result.ok) {
+      heartRateExportText.value = `${result.fileName ?? "heart_rate"} · ${result.rowCount ?? 0} rows`;
+      return `Heart-rate ${format.toUpperCase()} export ready.`;
+    }
+    return formatOpenResult("Heart-rate export", result);
   });
 }
 
@@ -2501,6 +2589,8 @@ async function setupCapacitorAppListeners() {
       if (activePage.value === "game") {
         startRefreshRatePolling();
       }
+      void refreshHeartRateState();
+      void refreshHeartRateHistory();
     });
   } catch {
     appPauseListenerHandle = null;

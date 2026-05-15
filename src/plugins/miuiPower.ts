@@ -46,7 +46,10 @@ export type HeartRateStatus =
   | "scanning"
   | "connecting"
   | "connected"
+  | "recording"
+  | "reconnecting"
   | "disconnected"
+  | "stopping"
   | "error";
 
 export interface HeartRateDevice {
@@ -82,7 +85,12 @@ export interface HeartRateState {
   latestSample?: HeartRateSample | null;
   sampleCount: number;
   serviceRunning: boolean;
+  foregroundNotificationVisible?: boolean;
+  autoReconnectEnabled?: boolean;
+  reconnectAttempt?: number;
+  nextReconnectDelayMs?: number | null;
   recording: boolean;
+  sessionId?: string | null;
   error?: string;
   bodySensorLocation?: string;
   batteryLevel?: number | null;
@@ -91,6 +99,8 @@ export interface HeartRateState {
 export interface HeartRatePermissionResult {
   granted: boolean;
   requiredPermissions: string[];
+  bleGranted?: boolean;
+  notificationGranted?: boolean;
 }
 
 export interface HeartRateScanResult {
@@ -104,6 +114,17 @@ export interface LastHeartRateDeviceResult {
 
 export interface HeartRateHistoryResult {
   samples: HeartRateSample[];
+}
+
+export interface HeartRateExportResult {
+  ok: boolean;
+  method: string;
+  format: "jsonl" | "csv";
+  contentUri?: string;
+  fileName?: string;
+  mimeType?: string;
+  rowCount?: number;
+  error?: string;
 }
 
 export interface ClipboardTextResult {
@@ -195,6 +216,13 @@ export interface MiuiPowerPlugin {
   disconnectHeartRateDevice(): Promise<OpenAppCommandResult>;
   startHeartRateRecording(): Promise<OpenAppCommandResult>;
   stopHeartRateRecording(): Promise<OpenAppCommandResult>;
+  getHeartRateServiceState(): Promise<HeartRateState>;
+  setHeartRateAutoReconnect(options: { enabled: boolean }): Promise<OpenAppCommandResult>;
+  exportHeartRateHistory(options: {
+    format: "jsonl" | "csv";
+    sinceMs?: number;
+    untilMs?: number;
+  }): Promise<HeartRateExportResult>;
   getHeartRateHistory(options?: { limit?: number; sinceMs?: number }): Promise<HeartRateHistoryResult>;
   clearHeartRateHistory(): Promise<OpenAppCommandResult>;
   addListener(

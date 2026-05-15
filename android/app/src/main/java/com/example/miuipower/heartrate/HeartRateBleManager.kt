@@ -1,5 +1,6 @@
 package com.example.miuipower.heartrate
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -15,11 +16,13 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import org.json.JSONObject
@@ -48,6 +51,14 @@ class HeartRateBleManager(
     private var pendingScanCompletion: ((JSObject) -> Unit)? = null
     private var scanUsesGenericFallback = false
     private var sawDeviceInScanPhase = false
+    private var serviceRunning = false
+    private var foregroundNotificationVisible = false
+    private var autoReconnectEnabled = preferences.getBoolean(KEY_AUTO_RECONNECT, true)
+    private var reconnectAttempt = 0
+    private var nextReconnectDelayMs: Long? = null
+    private var pendingRecordingStart = false
+    private var manualStopRequested = false
+    private var reconnectRunnable: Runnable? = null
 
     fun getStateJson(): JSObject = synchronized(this) {
         buildStateJson()
@@ -58,6 +69,48 @@ class HeartRateBleManager(
         return JSObject().apply {
             put("device", device?.toJson() ?: JSONObject.NULL)
         }
+    }
+
+    fun hasRecordingStartTarget(): Boolean = synchronized(this) {
+        connectedDevice != null || getLastDevice() != null
+    }
+
+    fun isRecordingActive(): Boolean = synchronized(this) {
+        recording || serviceRunning || pendingRecordingStart
+    }
+
+    fun markForegroundServiceRunning(visible: Boolean) {
+        synchronized(this) {
+            serviceRunning = true
+            foregroundNotificationVisible = visible
+            errorText = ""
+        }
+        emitState()
+    }
+
+    fun markForegroundServiceStopped() {
+        synchronized(this) {
+            serviceRunning = false
+            foregroundNotificationVisible = false
+            pendingRecordingStart = false
+        }
+        emitState()
+    }
+
+    fun setAutoReconnect(enabled: Boolean): JSObject {
+        synchronized(this) {
+            autoReconnectEnabled = enabled
+            preferences.edit().putBoolean(KEY_AUTO_RECONNECT, enabled).apply()
+            if (!enabled) {
+                cancelReconnectLocked()
+            }
+        }
+        emitState()
+        return operationResult(true, if (enabled) "auto_reconnect_enabled" else "auto_reconnect_disabled")
+    }
+
+    fun exportHistory(context: Context, format: String, sinceMs: Long?, untilMs: Long?): JSObject {
+        return storage.exportHistory(context, format, sinceMs, untilMs)
     }
 
     @SuppressLint("MissingPermission")
@@ -131,11 +184,13 @@ class HeartRateBleManager(
             remembered = false,
         )
         synchronized(this) {
+            cancelReconnectLocked()
             connectedDevice = displayDevice
             status = STATUS_CONNECTING
             errorText = ""
             bodySensorLocation = null
             batteryLevel = null
+            manualStopRequested = false
         }
         emitState()
 
@@ -168,37 +223,101 @@ class HeartRateBleManager(
     }
 
     fun disconnect(onComplete: (JSObject) -> Unit) {
+        synchronized(this) {
+            manualStopRequested = true
+            pendingRecordingStart = false
+            cancelReconnectLocked()
+        }
         disconnectInternal(resetState = true)
         onComplete(operationResult(true, "disconnect"))
     }
 
     fun startRecording(onComplete: (JSObject) -> Unit) {
+        startForegroundRecording(onComplete)
+    }
+
+    fun startForegroundRecording(onComplete: (JSObject) -> Unit) {
+        var deviceToConnect: HeartRateDevice? = null
         synchronized(this) {
-            if (status != STATUS_CONNECTED) {
-                onComplete(operationResult(false, "not_connected", "Heart-rate device is not connected"))
+            serviceRunning = true
+            foregroundNotificationVisible = true
+            manualStopRequested = false
+            cancelReconnectLocked()
+
+            if (connectedDevice != null && (status == STATUS_CONNECTED || status == STATUS_RECORDING)) {
+                beginRecordingLocked()
+                emitState()
+                onComplete(operationResult(true, "recording_started").apply {
+                    put("sessionId", currentSessionId)
+                })
                 return
             }
-            if (!recording) {
-                currentSessionId = storage.newSessionId()
-                storage.appendSession(currentSessionId, connectedDevice)
+
+            deviceToConnect = getLastDevice()
+            if (deviceToConnect == null) {
+                serviceRunning = false
+                foregroundNotificationVisible = false
+                pendingRecordingStart = false
+                onComplete(operationResult(false, "no_last_device", "Connect a heart-rate device before starting background recording"))
+                emitState()
+                return
             }
-            recording = true
+
+            pendingRecordingStart = true
+            status = STATUS_CONNECTING
             errorText = ""
         }
         emitState()
-        onComplete(operationResult(true, "recording_started").apply {
+        val target = deviceToConnect ?: return
+        connect(target.address, target.name) {
+            onComplete(operationResult(true, "foreground_service_connecting"))
+        }
+    }
+
+    fun stopRecording(onComplete: (JSObject) -> Unit) {
+        stopForegroundRecording(onComplete)
+    }
+
+    fun stopForegroundRecording(onComplete: (JSObject) -> Unit) {
+        val sessionToStop: String?
+        val samplesToStop: Int
+        synchronized(this) {
+            manualStopRequested = true
+            cancelReconnectLocked()
+            status = STATUS_STOPPING
+            sessionToStop = if (recording && currentSessionId != "live") currentSessionId else null
+            samplesToStop = sampleCount
+            recording = false
+            pendingRecordingStart = false
+            serviceRunning = false
+            foregroundNotificationVisible = false
+            nextReconnectDelayMs = null
+            reconnectAttempt = 0
+        }
+        emitState()
+        if (sessionToStop != null) {
+            storage.appendSessionStop(sessionToStop, samplesToStop)
+        }
+        disconnectInternal(resetState = true)
+        onComplete(operationResult(true, "recording_stopped").apply {
             put("sessionId", currentSessionId)
         })
     }
 
-    fun stopRecording(onComplete: (JSObject) -> Unit) {
-        synchronized(this) {
-            recording = false
+    private fun beginRecordingLocked() {
+        if (!recording) {
+            currentSessionId = storage.newSessionId()
+            sampleCount = 0
+            storage.appendSessionStart(currentSessionId, connectedDevice)
         }
-        emitState()
-        onComplete(operationResult(true, "recording_stopped").apply {
-            put("sessionId", currentSessionId)
-        })
+        recording = true
+        pendingRecordingStart = false
+        serviceRunning = true
+        foregroundNotificationVisible = true
+        status = STATUS_RECORDING
+        reconnectAttempt = 0
+        nextReconnectDelayMs = null
+        errorText = ""
     }
 
     fun readHistory(limit: Int, sinceMs: Long?): JSObject = JSObject().apply {
@@ -339,12 +458,18 @@ class HeartRateBleManager(
         }
         if (resetState) {
             synchronized(this) {
+                cancelReconnectLocked()
                 status = STATUS_DISCONNECTED
                 connectedDevice = null
                 latestSample = null
                 bodySensorLocation = null
                 batteryLevel = null
                 recording = false
+                pendingRecordingStart = false
+                serviceRunning = false
+                foregroundNotificationVisible = false
+                nextReconnectDelayMs = null
+                reconnectAttempt = 0
             }
             emitState()
         }
@@ -366,17 +491,38 @@ class HeartRateBleManager(
 
             if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 val detail = if (statusCode == BluetoothGatt.GATT_SUCCESS) "" else "GATT disconnected: $statusCode"
-                synchronized(this@HeartRateBleManager) {
-                    status = STATUS_DISCONNECTED
-                    errorText = detail
-                    connectedDevice = connectedDevice?.copy(remembered = getLastDevice()?.address == connectedDevice?.address)
-                    recording = false
-                }
                 runCatching { gatt.close() }
                 if (bluetoothGatt === gatt) {
                     bluetoothGatt = null
                 }
-                emitState()
+                val shouldReconnect = synchronized(this@HeartRateBleManager) {
+                    errorText = detail
+                    connectedDevice = connectedDevice?.copy(remembered = getLastDevice()?.address == connectedDevice?.address)
+                    (recording || pendingRecordingStart) &&
+                        serviceRunning &&
+                        autoReconnectEnabled &&
+                        !manualStopRequested &&
+                        connectedDevice != null
+                }
+                if (shouldReconnect) {
+                    scheduleReconnect(detail)
+                } else {
+                    val sessionToStop: String?
+                    val samplesToStop: Int
+                    synchronized(this@HeartRateBleManager) {
+                        sessionToStop = if (recording && currentSessionId != "live") currentSessionId else null
+                        samplesToStop = sampleCount
+                        status = STATUS_DISCONNECTED
+                        recording = false
+                        pendingRecordingStart = false
+                        serviceRunning = false
+                        foregroundNotificationVisible = false
+                    }
+                    if (sessionToStop != null) {
+                        storage.appendSessionStop(sessionToStop, samplesToStop)
+                    }
+                    emitState()
+                }
             }
         }
 
@@ -413,8 +559,14 @@ class HeartRateBleManager(
                 saveLastDevice(device)
             }
             synchronized(this@HeartRateBleManager) {
-                status = STATUS_CONNECTED
+                if (pendingRecordingStart || recording) {
+                    beginRecordingLocked()
+                } else {
+                    status = STATUS_CONNECTED
+                }
                 errorText = ""
+                reconnectAttempt = 0
+                nextReconnectDelayMs = null
             }
             emitState()
             readBodySensorOrBattery(gatt)
@@ -543,8 +695,8 @@ class HeartRateBleManager(
                 batteryLevel = batteryLevel,
             )
             latestSample = nextSample
-            sampleCount += 1
             if (recording) {
+                sampleCount += 1
                 storage.appendSample(nextSample)
             }
             nextSample
@@ -588,7 +740,20 @@ class HeartRateBleManager(
         put("device", connectedDevice?.toJson() ?: JSONObject.NULL)
         put("latestSample", latestSample?.toJson() ?: JSONObject.NULL)
         put("sampleCount", sampleCount)
-        put("serviceRunning", false)
+        put("serviceRunning", serviceRunning)
+        put("foregroundNotificationVisible", foregroundNotificationVisible)
+        put("autoReconnectEnabled", autoReconnectEnabled)
+        put("reconnectAttempt", reconnectAttempt)
+        if (nextReconnectDelayMs == null) {
+            put("nextReconnectDelayMs", JSONObject.NULL)
+        } else {
+            put("nextReconnectDelayMs", nextReconnectDelayMs)
+        }
+        if (recording && currentSessionId != "live") {
+            put("sessionId", currentSessionId)
+        } else {
+            put("sessionId", JSONObject.NULL)
+        }
         put("recording", recording)
         put("error", errorText)
         put("bodySensorLocation", bodySensorLocation ?: "")
@@ -599,9 +764,86 @@ class HeartRateBleManager(
         }
     }
 
+    private fun scheduleReconnect(detail: String) {
+        synchronized(this) {
+            if (!serviceRunning || manualStopRequested || !autoReconnectEnabled) {
+                return
+            }
+            if (connectedDevice == null) {
+                status = STATUS_DISCONNECTED
+                pendingRecordingStart = false
+                recording = false
+                return
+            }
+            val delayMs = HeartRateReconnectPolicy.delayForAttempt(reconnectAttempt)
+            reconnectAttempt += 1
+            nextReconnectDelayMs = delayMs
+            status = STATUS_RECONNECTING
+            errorText = detail
+            pendingRecordingStart = true
+            cancelReconnectLocked()
+            reconnectRunnable = Runnable {
+                reconnectRunnable = null
+                attemptReconnect()
+            }
+            mainHandler.postDelayed(reconnectRunnable!!, delayMs)
+        }
+        emitState()
+    }
+
+    private fun attemptReconnect() {
+        val targetDevice = synchronized(this) {
+            if (!serviceRunning || manualStopRequested || !autoReconnectEnabled) {
+                return
+            }
+            connectedDevice ?: getLastDevice() ?: return
+        }
+        val adapter = bluetoothAdapter()
+        if (adapter == null) {
+            setErrorState(STATUS_ERROR, "Bluetooth is unavailable")
+            return
+        }
+        if (!adapter.isEnabled) {
+            synchronized(this) {
+                status = STATUS_BLUETOOTH_OFF
+                nextReconnectDelayMs = null
+            }
+            emitState()
+            return
+        }
+        if (!hasBluetoothRuntimePermissions()) {
+            synchronized(this) {
+                status = STATUS_PERMISSION_REQUIRED
+                nextReconnectDelayMs = null
+            }
+            emitState()
+            return
+        }
+        connect(targetDevice.address, targetDevice.name) {
+            // State changes are emitted through GATT callbacks.
+        }
+    }
+
+    private fun cancelReconnectLocked() {
+        reconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+        reconnectRunnable = null
+        nextReconnectDelayMs = null
+    }
+
     private fun bluetoothAdapter(): BluetoothAdapter? {
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         return manager?.adapter
+    }
+
+    private fun hasBluetoothRuntimePermissions(): Boolean {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        return permissions.all { permission ->
+            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -630,6 +872,7 @@ class HeartRateBleManager(
         private const val PREFS_NAME = "heart_rate.v1"
         private const val KEY_LAST_ADDRESS = "last_address"
         private const val KEY_LAST_NAME = "last_name"
+        private const val KEY_AUTO_RECONNECT = "auto_reconnect"
         private const val CONNECT_TIMEOUT_MS = 15_000L
 
         const val STATUS_IDLE = "idle"
@@ -638,7 +881,10 @@ class HeartRateBleManager(
         const val STATUS_SCANNING = "scanning"
         const val STATUS_CONNECTING = "connecting"
         const val STATUS_CONNECTED = "connected"
+        const val STATUS_RECORDING = "recording"
+        const val STATUS_RECONNECTING = "reconnecting"
         const val STATUS_DISCONNECTED = "disconnected"
+        const val STATUS_STOPPING = "stopping"
         const val STATUS_ERROR = "error"
 
         val HEART_RATE_SERVICE_UUID: UUID = UUID.fromString("0000180D-0000-1000-8000-00805f9b34fb")

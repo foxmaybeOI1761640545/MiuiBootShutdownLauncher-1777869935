@@ -152,6 +152,15 @@ object HeartRateMeasurementParser {
     }
 }
 
+object HeartRateReconnectPolicy {
+    private val delaysMs = longArrayOf(1_000L, 3_000L, 5_000L, 10_000L)
+
+    fun delayForAttempt(attempt: Int): Long {
+        val safeIndex = attempt.coerceAtLeast(0).coerceAtMost(delaysMs.lastIndex)
+        return delaysMs[safeIndex]
+    }
+}
+
 fun ByteArray.toHexString(): String =
     joinToString(separator = "") { byte -> "%02X".format(Locale.US, byte.toInt() and 0xFF) }
 

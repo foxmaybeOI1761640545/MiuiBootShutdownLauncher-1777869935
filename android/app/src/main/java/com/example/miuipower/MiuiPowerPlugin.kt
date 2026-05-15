@@ -17,8 +17,8 @@ import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import androidx.core.content.ContextCompat
-import com.example.miuipower.heartrate.HeartRateBleManager
-import com.example.miuipower.heartrate.HeartRateStorage
+import com.example.miuipower.heartrate.HeartRateEnvironment
+import com.example.miuipower.heartrate.HeartRateForegroundService
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -36,20 +36,28 @@ import kotlin.math.roundToInt
         Permission(strings = [Manifest.permission.BLUETOOTH_SCAN], alias = "heartRateScan"),
         Permission(strings = [Manifest.permission.BLUETOOTH_CONNECT], alias = "heartRateConnect"),
         Permission(strings = [Manifest.permission.ACCESS_FINE_LOCATION], alias = "heartRateLocation"),
+        Permission(strings = [Manifest.permission.POST_NOTIFICATIONS], alias = "heartRateNotifications"),
     ],
 )
 class MiuiPowerPlugin : Plugin() {
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
-    private val heartRateManager by lazy {
-        HeartRateBleManager(
-            context = context,
-            storage = HeartRateStorage(context.filesDir),
-        ) { eventName, data, retain ->
+    private val heartRateManager by lazy { HeartRateEnvironment.manager(context.applicationContext) }
+    private var removeHeartRateEventSink: (() -> Unit)? = null
+
+    override fun load() {
+        super.load()
+        removeHeartRateEventSink = HeartRateEnvironment.addEventSink { eventName, data, retain ->
             mainHandler.post {
                 notifyListeners(eventName, data, retain)
             }
         }
+    }
+
+    override fun handleOnDestroy() {
+        removeHeartRateEventSink?.invoke()
+        removeHeartRateEventSink = null
+        super.handleOnDestroy()
     }
 
     companion object {
@@ -300,7 +308,7 @@ class MiuiPowerPlugin : Plugin() {
 
     @PluginMethod
     fun scanHeartRateDevices(call: PluginCall) {
-        if (!hasHeartRatePermissions()) {
+        if (!hasHeartRateBlePermissions()) {
             call.resolve(heartRatePermissionResult(false).apply {
                 put("devices", JSArray())
                 put("state", heartRateManager.getStateJson())
@@ -321,7 +329,7 @@ class MiuiPowerPlugin : Plugin() {
 
     @PluginMethod
     fun connectHeartRateDevice(call: PluginCall) {
-        if (!hasHeartRatePermissions()) {
+        if (!hasHeartRateBlePermissions()) {
             call.resolve(heartRatePermissionResult(false).apply {
                 put("state", heartRateManager.getStateJson())
             })
@@ -342,6 +350,13 @@ class MiuiPowerPlugin : Plugin() {
 
     @PluginMethod
     fun disconnectHeartRateDevice(call: PluginCall) {
+        if (heartRateManager.isRecordingActive()) {
+            stopHeartRateService()
+            call.resolve(result(true, "recording_stop_requested").apply {
+                put("state", heartRateManager.getStateJson())
+            })
+            return
+        }
         heartRateManager.disconnect { result ->
             mainHandler.post { call.resolve(result) }
         }
@@ -349,16 +364,66 @@ class MiuiPowerPlugin : Plugin() {
 
     @PluginMethod
     fun startHeartRateRecording(call: PluginCall) {
-        heartRateManager.startRecording { result ->
-            mainHandler.post { call.resolve(result) }
+        if (!hasHeartRateBlePermissions()) {
+            call.resolve(heartRatePermissionResult(false).apply {
+                put("method", "permission_required")
+                put("state", heartRateManager.getStateJson())
+            })
+            return
+        }
+        if (!hasHeartRateNotificationPermission()) {
+            call.resolve(result(false, "notification_permission_required").apply {
+                put("state", heartRateManager.getStateJson())
+            })
+            return
+        }
+        if (!heartRateManager.hasRecordingStartTarget()) {
+            call.resolve(result(false, "no_last_device").apply {
+                put("state", heartRateManager.getStateJson())
+            })
+            return
+        }
+        try {
+            val intent = Intent(context, HeartRateForegroundService::class.java).apply {
+                action = HeartRateForegroundService.ACTION_START_RECORDING
+            }
+            ContextCompat.startForegroundService(context, intent)
+            call.resolve(result(true, "foreground_service_starting").apply {
+                put("state", heartRateManager.getStateJson())
+            })
+        } catch (error: Exception) {
+            call.resolve(result(false, "foreground_service_start_failed").apply {
+                put("error", error.message ?: error.javaClass.simpleName)
+                put("state", heartRateManager.getStateJson())
+            })
         }
     }
 
     @PluginMethod
     fun stopHeartRateRecording(call: PluginCall) {
-        heartRateManager.stopRecording { result ->
-            mainHandler.post { call.resolve(result) }
-        }
+        stopHeartRateService()
+        call.resolve(result(true, "foreground_service_stop_requested").apply {
+            put("state", heartRateManager.getStateJson())
+        })
+    }
+
+    @PluginMethod
+    fun getHeartRateServiceState(call: PluginCall) {
+        call.resolve(heartRateManager.getStateJson())
+    }
+
+    @PluginMethod
+    fun setHeartRateAutoReconnect(call: PluginCall) {
+        val enabled = call.getBoolean("enabled") ?: true
+        call.resolve(heartRateManager.setAutoReconnect(enabled))
+    }
+
+    @PluginMethod
+    fun exportHeartRateHistory(call: PluginCall) {
+        val format = call.getString("format") ?: "jsonl"
+        val sinceMs = call.getLong("sinceMs")
+        val untilMs = call.getLong("untilMs")
+        call.resolve(heartRateManager.exportHistory(context, format, sinceMs, untilMs))
     }
 
     @PluginMethod
@@ -1440,18 +1505,28 @@ class MiuiPowerPlugin : Plugin() {
     }
 
     private fun requiredHeartRatePermissionAliases(): Array<String> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val bleAliases = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf("heartRateScan", "heartRateConnect")
         } else {
             arrayOf("heartRateLocation")
         }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            bleAliases + "heartRateNotifications"
+        } else {
+            bleAliases
+        }
     }
 
     private fun requiredHeartRatePermissionStrings(): List<String> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val blePermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         } else {
             listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            blePermissions + Manifest.permission.POST_NOTIFICATIONS
+        } else {
+            blePermissions
         }
     }
 
@@ -1461,11 +1536,42 @@ class MiuiPowerPlugin : Plugin() {
         }
     }
 
+    private fun requiredHeartRateBlePermissionStrings(): List<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+    private fun hasHeartRateBlePermissions(): Boolean {
+        return requiredHeartRateBlePermissionStrings().all { permission ->
+            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun hasHeartRateNotificationPermission(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+    }
+
     private fun heartRatePermissionResult(granted: Boolean): JSObject {
         return JSObject().apply {
             put("granted", granted)
             put("requiredPermissions", JSArray(requiredHeartRatePermissionStrings()))
+            put("bleGranted", hasHeartRateBlePermissions())
+            put("notificationGranted", hasHeartRateNotificationPermission())
         }
+    }
+
+    private fun stopHeartRateService() {
+        val intent = Intent(context, HeartRateForegroundService::class.java).apply {
+            action = HeartRateForegroundService.ACTION_STOP_RECORDING
+        }
+        context.startService(intent)
     }
 
     private fun result(ok: Boolean, method: String): JSObject {
