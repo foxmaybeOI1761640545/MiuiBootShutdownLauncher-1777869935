@@ -94,6 +94,8 @@ export interface HeartRateState {
   error?: string;
   bodySensorLocation?: string;
   batteryLevel?: number | null;
+  lastNativeUpdateMs?: number;
+  lastSampleTimestampMs?: number | null;
 }
 
 export interface HeartRatePermissionResult {
@@ -134,6 +136,16 @@ export interface HeartRateExportResult {
   statusCode?: number;
   path?: string;
   error?: string;
+}
+
+export interface HeartRateStorageStats {
+  historyRows: number;
+  historySizeBytes: number;
+  sessionsRows: number;
+  sessionsSizeBytes: number;
+  exportFileCount: number;
+  exportCacheSizeBytes: number;
+  totalHeartRateSizeBytes: number;
 }
 
 export interface GitHubExportSettings {
@@ -274,6 +286,7 @@ export interface MiuiPowerPlugin {
     target?: HeartRateShareTarget;
   }): Promise<HeartRateExportResult>;
   saveHeartRateExportToDownloads(options: { format: HeartRateExportFormat }): Promise<HeartRateExportResult>;
+  markFrontendReady(options: { page: string; timestampMs: number }): Promise<OpenAppCommandResult>;
   saveGitHubExportSettings(options: {
     owner: string;
     repo: string;
@@ -288,7 +301,10 @@ export interface MiuiPowerPlugin {
     path?: string;
   }): Promise<GitHubUploadResult>;
   getHeartRateHistory(options?: { limit?: number; sinceMs?: number }): Promise<HeartRateHistoryResult>;
+  getHeartRateStorageStats(): Promise<HeartRateStorageStats>;
   clearHeartRateHistory(): Promise<OpenAppCommandResult>;
+  clearHeartRateExportCache(): Promise<OpenAppCommandResult>;
+  clearAllHeartRateData(): Promise<OpenAppCommandResult>;
   addListener(
     eventName: "heartRateStateChanged",
     listenerFunc: (state: HeartRateState) => void,

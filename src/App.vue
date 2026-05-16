@@ -57,6 +57,8 @@
                   <strong>{{ heartRateState.sampleCount }}</strong>
                   <span>Service</span>
                   <strong>{{ heartRateServiceText }}</strong>
+                  <span>Sample</span>
+                  <strong>{{ heartRateSampleFreshnessText }}</strong>
                   <span>Reconnect</span>
                   <strong>{{ heartRateReconnectText }}</strong>
                 </div>
@@ -69,21 +71,39 @@
                   <small>BPM</small>
                 </div>
                 <div class="run-sample-meta">
-                  <span>{{ latestHeartRateSample?.bpmFormat ?? "--" }}</span>
-                  <span>{{ formatHeartRateSampleTime(latestHeartRateSample) }}</span>
+                  <span>{{ latestValidHeartRateSample?.bpmFormat ?? latestHeartRateSample?.bpmFormat ?? "--" }}</span>
+                  <span>{{ heartRateClockSummary }}</span>
                 </div>
               </article>
 
               <article class="run-chart-card">
-                <svg viewBox="0 0 100 48" class="run-chart" aria-label="Heart-rate trend">
+                <svg viewBox="0 0 340 124" class="hr-trend-chart" preserveAspectRatio="none" aria-label="Heart-rate trend">
+                  <g class="hr-trend-grid-lines">
+                    <line
+                      v-for="tick in HEART_RATE_CHART_TICKS"
+                      :key="`grid-${tick}`"
+                      :x1="CHART_LEFT"
+                      :y1="chartTickY(tick)"
+                      :x2="CHART_RIGHT"
+                      :y2="chartTickY(tick)"
+                      class="hr-trend-grid"
+                    />
+                  </g>
+                  <g class="hr-trend-axis-labels">
+                    <text
+                      v-for="tick in HEART_RATE_CHART_TICKS"
+                      :key="`axis-${tick}`"
+                      :x="chartTickLabelX(tick)"
+                      :y="chartTickY(tick) + 4"
+                      class="hr-trend-axis-label"
+                    >
+                      {{ tick }}
+                    </text>
+                  </g>
                   <polyline
                     v-if="heartRateTrendPolyline"
                     :points="heartRateTrendPolyline"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="3"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+                    class="hr-trend-line"
                   />
                 </svg>
               </article>
@@ -149,7 +169,7 @@
                 <div class="run-history-head">
                   <div>
                     <p class="run-card-label">Local JSONL</p>
-                    <strong>{{ heartRateHistoryCount }} rows</strong>
+                    <strong>{{ heartRateHistorySummary }}</strong>
                     <small>{{ lastHeartRateExportText }}</small>
                   </div>
                   <div class="settings-row-btns">
@@ -175,8 +195,29 @@
                     <button type="button" class="mini-btn" :disabled="isLoading" @click="exportHeartRateHistory('jsonl')">
                       JSONL
                     </button>
-                    <button type="button" class="mini-btn mini-btn-danger" :disabled="isLoading" @click="clearHeartRateHistory">
-                      Clear
+                    <button
+                      type="button"
+                      class="mini-btn mini-btn-danger"
+                      :disabled="heartRateStorageActionsDisabled"
+                      @click="clearHeartRateHistory"
+                    >
+                      Clear History
+                    </button>
+                    <button
+                      type="button"
+                      class="mini-btn mini-btn-danger"
+                      :disabled="heartRateStorageActionsDisabled"
+                      @click="clearHeartRateExportCache"
+                    >
+                      Clear Exports
+                    </button>
+                    <button
+                      type="button"
+                      class="mini-btn mini-btn-danger"
+                      :disabled="heartRateStorageActionsDisabled"
+                      @click="clearAllHeartRateData"
+                    >
+                      Clear All
                     </button>
                   </div>
                 </div>
@@ -184,6 +225,24 @@
                   <div v-for="sample in heartRateHistory.slice(-5).reverse()" :key="`${sample.timestampMs}-${sample.rawHex}`">
                     <span>{{ formatHeartRateSampleTime(sample) }}</span>
                     <strong>{{ sample.bpm }} BPM</strong>
+                  </div>
+                </div>
+                <div class="run-storage-list">
+                  <div>
+                    <span>History</span>
+                    <strong>{{ heartRateStorageStats.historyRows }} rows · {{ formatBytes(heartRateStorageStats.historySizeBytes) }}</strong>
+                  </div>
+                  <div>
+                    <span>Sessions</span>
+                    <strong>{{ heartRateStorageStats.sessionsRows }} rows · {{ formatBytes(heartRateStorageStats.sessionsSizeBytes) }}</strong>
+                  </div>
+                  <div>
+                    <span>Export cache</span>
+                    <strong>{{ heartRateStorageStats.exportFileCount }} files · {{ formatBytes(heartRateStorageStats.exportCacheSizeBytes) }}</strong>
+                  </div>
+                  <div>
+                    <span>Total</span>
+                    <strong>{{ formatBytes(heartRateStorageStats.totalHeartRateSizeBytes) }}</strong>
                   </div>
                 </div>
                 <div class="run-export-actions">
@@ -688,12 +747,14 @@ import {
   type HeartRateExportResult,
   type HeartRateSample,
   type HeartRateState,
+  type HeartRateStorageStats,
   type GitHubExportSettingsResult,
   type LaunchIntentOptions,
   type OpenAppCommandResult,
   type LaunchIntentExtraValue,
 } from "./plugins/miuiPower";
 import { MiuiPower } from "./plugins/miuiPower";
+import { formatShanghaiDateTime, formatShanghaiTime } from "./time";
 import {
   buildDefaultLauncherConfig,
   buildDefaultLauncherUiState,
@@ -736,6 +797,17 @@ type ClipboardUrlProtocol = "http:" | "https:" | "bilibili:" | "qqmusic:";
 const THEME_MODE_STORAGE_KEY = "launcher.theme-mode.v1";
 const HONOR_OF_KINGS_PACKAGE = "com.tencent.tmgp.sgame";
 const REFRESH_RATE_POLL_INTERVAL_MS = 100;
+const TREND_WINDOW_MS = 60_000;
+const TREND_MAX_POINTS = 180;
+const CHART_MIN_BPM = 0;
+const CHART_MAX_BPM = 240;
+const HEART_RATE_CHART_TICKS = [240, 180, 120, 60, 0];
+const CHART_LEFT = 34;
+const CHART_RIGHT = 332;
+const CHART_TOP = 8;
+const CHART_BOTTOM = 112;
+const CHART_WIDTH = CHART_RIGHT - CHART_LEFT;
+const CHART_HEIGHT = CHART_BOTTOM - CHART_TOP;
 
 interface ActionItem {
   key: string;
@@ -847,6 +919,8 @@ interface GitHubExportForm {
   tokenSaved: boolean;
 }
 
+type SampleFreshness = "none" | "fresh" | "stale" | "lost";
+
 interface CapacitorAppListenerHandle {
   remove: () => Promise<void> | void;
 }
@@ -934,7 +1008,18 @@ const heartRateDevices = ref<HeartRateDevice[]>([]);
 const lastHeartRateDevice = ref<HeartRateDevice | null>(null);
 const heartRateHistory = ref<HeartRateSample[]>([]);
 const liveHeartRateSamples = ref<HeartRateSample[]>([]);
+const latestValidHeartRateSample = ref<HeartRateSample | null>(null);
 const lastHeartRateExport = ref<HeartRateExportResult | null>(null);
+const heartRateStorageStats = ref<HeartRateStorageStats>({
+  historyRows: 0,
+  historySizeBytes: 0,
+  sessionsRows: 0,
+  sessionsSizeBytes: 0,
+  exportFileCount: 0,
+  exportCacheSizeBytes: 0,
+  totalHeartRateSizeBytes: 0,
+});
+const uiClockNowMs = ref(Date.now());
 const githubExportForm = reactive<GitHubExportForm>({
   owner: "",
   repo: "",
@@ -950,11 +1035,50 @@ let appResumeListenerHandle: CapacitorAppListenerHandle | null = null;
 let heartRateStateListenerHandle: CapacitorAppListenerHandle | null = null;
 let heartRateDeviceListenerHandle: CapacitorAppListenerHandle | null = null;
 let heartRateSampleListenerHandle: CapacitorAppListenerHandle | null = null;
+let heartRateClockTimer: number | undefined;
 
 const isLoading = computed(() => loadingAction.value !== "");
 const displayMessage = computed(() => message.value || "Waiting for action. Tap any entry button.");
 const latestHeartRateSample = computed(() => heartRateState.value.latestSample ?? null);
-const displayHeartRateBpm = computed(() => latestHeartRateSample.value?.bpm ?? null);
+const displayHeartRateBpm = computed(() => latestValidHeartRateSample.value?.bpm ?? null);
+const currentShanghaiTime = computed(() => formatShanghaiTime(uiClockNowMs.value));
+const lastSampleShanghaiTime = computed(() =>
+  latestHeartRateSample.value ? formatShanghaiTime(latestHeartRateSample.value.timestampMs) : "--",
+);
+const lastSampleAgeSeconds = computed(() => {
+  const sample = latestHeartRateSample.value;
+  if (!sample) {
+    return null;
+  }
+  return Math.max(0, Math.floor((uiClockNowMs.value - sample.timestampMs) / 1000));
+});
+const sampleFreshness = computed<SampleFreshness>(() => {
+  const age = lastSampleAgeSeconds.value;
+  if (age == null) {
+    return "none";
+  }
+  if (age <= 3) {
+    return "fresh";
+  }
+  if (age <= 10) {
+    return "stale";
+  }
+  return "lost";
+});
+const heartRateSampleFreshnessText = computed(() => {
+  const labels: Record<SampleFreshness, string> = {
+    none: "--",
+    fresh: "Fresh",
+    stale: "Stale",
+    lost: "Lost",
+  };
+  return labels[sampleFreshness.value];
+});
+const heartRateClockSummary = computed(() => {
+  const age = lastSampleAgeSeconds.value;
+  const ageText = age == null ? "" : ` · ${age}s ago`;
+  return `Now ${currentShanghaiTime.value} · Last ${lastSampleShanghaiTime.value}${ageText}`;
+});
 const heartRateStatusLabel = computed(() => {
   const labels: Record<HeartRateState["status"], string> = {
     idle: "Idle",
@@ -980,11 +1104,18 @@ const heartRateBatteryText = computed(() => {
   return typeof level === "number" ? `${level}%` : "--";
 });
 const heartRateHistoryCount = computed(() => heartRateHistory.value.length);
+const heartRateHistorySummary = computed(() => {
+  const rows = heartRateStorageStats.value.historyRows || heartRateHistoryCount.value;
+  return `${rows} rows · ${formatBytes(heartRateStorageStats.value.historySizeBytes)}`;
+});
 const lastHeartRateExportText = computed(() =>
   lastHeartRateExport.value?.ok ? formatHeartRateExportSummary(lastHeartRateExport.value) : "No export yet",
 );
 const githubTokenPlaceholder = computed(() => (githubExportForm.tokenSaved ? "Saved token unchanged" : "Fine-grained PAT"));
-const heartRateTrendPolyline = computed(() => buildHeartRateTrendPolyline(liveHeartRateSamples.value.slice(-60)));
+const heartRateTrendPolyline = computed(() => buildHeartRateTrendPolyline(liveHeartRateSamples.value, uiClockNowMs.value));
+const heartRateStorageActionsDisabled = computed(
+  () => isLoading.value || heartRateState.value.recording || heartRateState.value.serviceRunning,
+);
 const heartRateServiceText = computed(() => {
   if (!heartRateState.value.serviceRunning) {
     return "Off";
@@ -1102,6 +1233,8 @@ function normalizeHeartRateState(raw: HeartRateState): HeartRateState {
     error: raw.error ?? "",
     bodySensorLocation: raw.bodySensorLocation ?? "",
     batteryLevel: typeof raw.batteryLevel === "number" ? raw.batteryLevel : null,
+    lastNativeUpdateMs: typeof raw.lastNativeUpdateMs === "number" ? raw.lastNativeUpdateMs : undefined,
+    lastSampleTimestampMs: typeof raw.lastSampleTimestampMs === "number" ? raw.lastSampleTimestampMs : null,
   };
 }
 
@@ -1110,15 +1243,39 @@ function applyHeartRateState(raw: HeartRateState) {
   const sample = heartRateState.value.latestSample;
   if (sample) {
     pushLiveHeartRateSample(sample);
+  } else if (heartRateState.value.status === "idle" || heartRateState.value.status === "disconnected") {
+    latestValidHeartRateSample.value = null;
   }
 }
 
 function pushLiveHeartRateSample(sample: HeartRateSample) {
+  if (sample.bpm > 0) {
+    latestValidHeartRateSample.value = sample;
+  }
   const previous = liveHeartRateSamples.value[liveHeartRateSamples.value.length - 1];
   if (previous?.timestampMs === sample.timestampMs && previous.rawHex === sample.rawHex) {
     return;
   }
-  liveHeartRateSamples.value = [...liveHeartRateSamples.value, sample].slice(-240);
+  liveHeartRateSamples.value = [...liveHeartRateSamples.value, sample].slice(-1_000);
+}
+
+function mergeLiveHeartRateSamples(samples: HeartRateSample[]) {
+  if (samples.length === 0) {
+    return;
+  }
+  const merged = new Map<string, HeartRateSample>();
+  for (const sample of liveHeartRateSamples.value) {
+    merged.set(`${sample.timestampMs}-${sample.rawHex}`, sample);
+  }
+  for (const sample of samples) {
+    merged.set(`${sample.timestampMs}-${sample.rawHex}`, sample);
+    if (sample.bpm > 0) {
+      latestValidHeartRateSample.value = sample;
+    }
+  }
+  liveHeartRateSamples.value = [...merged.values()]
+    .sort((left, right) => left.timestampMs - right.timestampMs)
+    .slice(-1_000);
 }
 
 function upsertHeartRateDevice(device: HeartRateDevice) {
@@ -1134,22 +1291,64 @@ function upsertHeartRateDevice(device: HeartRateDevice) {
   });
 }
 
-function buildHeartRateTrendPolyline(samples: HeartRateSample[]) {
-  const values = samples
-    .map((sample) => sample.bpm)
-    .filter((value) => Number.isFinite(value) && value > 0);
-  if (values.length === 0) {
+function clampBpm(bpm: number) {
+  return Math.max(CHART_MIN_BPM, Math.min(CHART_MAX_BPM, bpm));
+}
+
+function chartTickY(tick: number) {
+  return CHART_BOTTOM - ((tick - CHART_MIN_BPM) / (CHART_MAX_BPM - CHART_MIN_BPM)) * CHART_HEIGHT;
+}
+
+function chartTickLabelX(tick: number) {
+  if (tick === 0) {
+    return 20;
+  }
+  if (tick === 60) {
+    return 12;
+  }
+  return 4;
+}
+
+function downsampleByTime(samples: HeartRateSample[], maxPoints: number) {
+  if (samples.length <= maxPoints) {
+    return samples;
+  }
+  const firstMs = samples[0]?.timestampMs ?? 0;
+  const lastMs = samples[samples.length - 1]?.timestampMs ?? firstMs;
+  const spanMs = Math.max(1, lastMs - firstMs);
+  const buckets = new Map<number, HeartRateSample>();
+  for (const sample of samples) {
+    const bucket = Math.min(maxPoints - 1, Math.floor(((sample.timestampMs - firstMs) / spanMs) * maxPoints));
+    buckets.set(bucket, sample);
+  }
+  return [...buckets.values()].sort((left, right) => left.timestampMs - right.timestampMs);
+}
+
+function sampleToTrendPoint(sample: HeartRateSample, nowMs: number) {
+  const ageMs = nowMs - sample.timestampMs;
+  const x = CHART_RIGHT - (ageMs / TREND_WINDOW_MS) * CHART_WIDTH;
+  const y =
+    CHART_BOTTOM -
+    ((clampBpm(sample.bpm) - CHART_MIN_BPM) / (CHART_MAX_BPM - CHART_MIN_BPM)) * CHART_HEIGHT;
+  return { x, y };
+}
+
+function buildHeartRateTrendPolyline(samples: HeartRateSample[], nowMs: number) {
+  const validSamples = samples
+    .filter((sample) => Number.isFinite(sample.bpm) && sample.bpm > 0)
+    .filter((sample) => nowMs - sample.timestampMs >= 0)
+    .filter((sample) => nowMs - sample.timestampMs <= TREND_WINDOW_MS)
+    .sort((left, right) => left.timestampMs - right.timestampMs);
+
+  if (validSamples.length === 0) {
     return "";
   }
-  const min = Math.min(...values, 50);
-  const max = Math.max(...values, 150);
-  const range = Math.max(1, max - min);
-  return values
-    .map((value, index) => {
-      const x = values.length === 1 ? 100 : (index / (values.length - 1)) * 100;
-      const y = 44 - ((value - min) / range) * 36;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
+
+  const sampled = downsampleByTime(validSamples, TREND_MAX_POINTS);
+  return sampled
+    .map((sample) => sampleToTrendPoint(sample, nowMs))
+    .filter((point) => point.x >= CHART_LEFT && point.x <= CHART_RIGHT)
+    .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
     .join(" ");
 }
 
@@ -1157,11 +1356,7 @@ function formatHeartRateSampleTime(sample: HeartRateSample | null) {
   if (!sample) {
     return "--";
   }
-  return new Date(sample.timestampMs).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  return formatShanghaiTime(sample.timestampMs);
 }
 
 function formatHeartRateRr(sample: HeartRateSample | null) {
@@ -1194,13 +1389,7 @@ function formatExportTime(value: number | undefined) {
   if (typeof value !== "number" || value <= 0) {
     return "--";
   }
-  return new Date(value).toLocaleString([], {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  return formatShanghaiDateTime(value);
 }
 
 function formatHeartRateExportSummary(result: HeartRateExportResult) {
@@ -1234,7 +1423,9 @@ async function refreshHeartRateServiceState() {
 async function refreshHeartRateHistory() {
   try {
     const result = await MiuiPower.getHeartRateHistory({ limit: 80 });
-    heartRateHistory.value = result.samples ?? [];
+    const samples = result.samples ?? [];
+    heartRateHistory.value = samples;
+    mergeLiveHeartRateSamples(samples);
   } catch {
     heartRateHistory.value = [];
   }
@@ -1255,6 +1446,22 @@ async function refreshLastHeartRateExport() {
     lastHeartRateExport.value = result.ok ? result : null;
   } catch {
     lastHeartRateExport.value = null;
+  }
+}
+
+async function refreshHeartRateStorageStats() {
+  try {
+    heartRateStorageStats.value = await MiuiPower.getHeartRateStorageStats();
+  } catch {
+    heartRateStorageStats.value = {
+      historyRows: heartRateHistory.value.length,
+      historySizeBytes: 0,
+      sessionsRows: 0,
+      sessionsSizeBytes: 0,
+      exportFileCount: 0,
+      exportCacheSizeBytes: 0,
+      totalHeartRateSizeBytes: 0,
+    };
   }
 }
 
@@ -1285,6 +1492,17 @@ async function consumeOpenAppIntent() {
   }
 }
 
+async function markFrontendReady() {
+  try {
+    await MiuiPower.markFrontendReady({
+      page: activePage.value,
+      timestampMs: Date.now(),
+    });
+  } catch {
+    // Native plugin may be unavailable in browser preview.
+  }
+}
+
 async function syncHeartRateOnResume() {
   await consumeOpenAppIntent();
   await Promise.all([
@@ -1292,7 +1510,9 @@ async function syncHeartRateOnResume() {
     refreshHeartRateServiceState(),
     refreshHeartRateHistory(),
     refreshLastHeartRateExport(),
+    refreshHeartRateStorageStats(),
   ]);
+  await markFrontendReady();
 }
 
 async function requestHeartRatePermissions() {
@@ -1359,6 +1579,7 @@ async function startHeartRateRecording() {
     const result = await MiuiPower.startHeartRateRecording();
     await refreshHeartRateState();
     await refreshHeartRateHistory();
+    await refreshHeartRateStorageStats();
     return result.ok ? "Heart-rate foreground recording starting." : formatOpenResult("Heart-rate recording", result);
   });
 }
@@ -1368,6 +1589,7 @@ async function stopHeartRateRecording() {
     const result = await MiuiPower.stopHeartRateRecording();
     await refreshHeartRateState();
     await refreshHeartRateHistory();
+    await refreshHeartRateStorageStats();
     return result.ok ? "Heart-rate foreground recording stop requested." : formatOpenResult("Heart-rate recording", result);
   });
 }
@@ -1388,6 +1610,7 @@ async function exportHeartRateHistory(format: HeartRateExportFormat) {
     const result = await MiuiPower.exportHeartRateHistory({ format });
     if (result.ok) {
       applyLastHeartRateExport(result);
+      await refreshHeartRateStorageStats();
       return `Heart-rate ${format.toUpperCase()} export ready: ${formatHeartRateExportSummary(result)}.`;
     }
     return formatOpenResult("Heart-rate export", result);
@@ -1399,6 +1622,7 @@ async function shareHeartRateExport(format: HeartRateExportFormat, target: "syst
     const result = await MiuiPower.shareHeartRateExport({ format, target });
     if (result.ok) {
       applyLastHeartRateExport(result);
+      await refreshHeartRateStorageStats();
       return target === "wechat"
         ? `Heart-rate ${format.toUpperCase()} export sent to WeChat.`
         : `Heart-rate ${format.toUpperCase()} share sheet opened.`;
@@ -1412,6 +1636,7 @@ async function saveHeartRateExportToDownloads(format: HeartRateExportFormat) {
     const result = await MiuiPower.saveHeartRateExportToDownloads({ format });
     if (result.ok) {
       applyLastHeartRateExport(result);
+      await refreshHeartRateStorageStats();
       return `Saved ${result.fileName ?? "heart_rate"} to Downloads.`;
     }
     return formatOpenResult("Heart-rate save", result);
@@ -1469,9 +1694,38 @@ async function uploadHeartRateExportToGitHub(format: HeartRateExportFormat) {
 async function clearHeartRateHistory() {
   await runWithLoading("heartRateClear", "Heart-rate history clear failed", async () => {
     const result = await MiuiPower.clearHeartRateHistory();
-    heartRateHistory.value = [];
-    await refreshHeartRateState();
+    if (result.ok) {
+      heartRateHistory.value = [];
+      liveHeartRateSamples.value = [];
+      latestValidHeartRateSample.value = null;
+    }
+    await Promise.all([refreshHeartRateState(), refreshHeartRateStorageStats()]);
     return result.ok ? "Heart-rate history cleared." : formatOpenResult("Heart-rate history", result);
+  });
+}
+
+async function clearHeartRateExportCache() {
+  await runWithLoading("heartRateClearExports", "Heart-rate export cache clear failed", async () => {
+    const result = await MiuiPower.clearHeartRateExportCache();
+    if (result.ok) {
+      lastHeartRateExport.value = null;
+    }
+    await Promise.all([refreshLastHeartRateExport(), refreshHeartRateStorageStats()]);
+    return result.ok ? "Heart-rate export cache cleared." : formatOpenResult("Heart-rate export cache", result);
+  });
+}
+
+async function clearAllHeartRateData() {
+  await runWithLoading("heartRateClearAll", "Heart-rate data clear failed", async () => {
+    const result = await MiuiPower.clearAllHeartRateData();
+    if (result.ok) {
+      heartRateHistory.value = [];
+      liveHeartRateSamples.value = [];
+      latestValidHeartRateSample.value = null;
+      lastHeartRateExport.value = null;
+    }
+    await Promise.all([refreshHeartRateState(), refreshLastHeartRateExport(), refreshHeartRateStorageStats()]);
+    return result.ok ? "Heart-rate data cleared." : formatOpenResult("Heart-rate data", result);
   });
 }
 
@@ -1488,6 +1742,26 @@ function getCapacitorAppPlugin(): CapacitorAppPluginLike | null {
 
 function isDocumentVisible() {
   return typeof document === "undefined" || document.visibilityState === "visible";
+}
+
+function startHeartRateClock() {
+  if (typeof window === "undefined" || heartRateClockTimer !== undefined) {
+    return;
+  }
+  const tick = () => {
+    const now = Date.now();
+    uiClockNowMs.value = now;
+    const delay = 1000 - (now % 1000) + 20;
+    heartRateClockTimer = window.setTimeout(tick, delay);
+  };
+  tick();
+}
+
+function stopHeartRateClock() {
+  if (heartRateClockTimer !== undefined) {
+    window.clearTimeout(heartRateClockTimer);
+    heartRateClockTimer = undefined;
+  }
 }
 
 function shouldRunRefreshRatePolling() {
@@ -2871,6 +3145,11 @@ async function setupHeartRateListeners() {
       upsertHeartRateDevice(device);
     });
     heartRateSampleListenerHandle = await MiuiPower.addListener("heartRateSample", (sample) => {
+      heartRateState.value = {
+        ...heartRateState.value,
+        latestSample: sample,
+        lastSampleTimestampMs: sample.timestampMs,
+      };
       pushLiveHeartRateSample(sample);
       if (heartRateState.value.recording) {
         heartRateHistory.value = [...heartRateHistory.value, sample].slice(-80);
@@ -2884,6 +3163,7 @@ async function setupHeartRateListeners() {
 }
 
 onMounted(() => {
+  startHeartRateClock();
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", handleVisibilityChange);
   }
@@ -2898,6 +3178,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  stopHeartRateClock();
   stopRefreshRatePolling();
   isReadingRefreshRate = false;
   if (typeof document !== "undefined") {

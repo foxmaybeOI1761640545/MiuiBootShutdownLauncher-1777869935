@@ -9,6 +9,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 data class HeartRateExportFile(
     val file: File,
@@ -78,10 +79,44 @@ class HeartRateStorage(private val filesDir: File) {
     }
 
     @Synchronized
-    fun clear() {
-        ensureRootDir()
-        samplesFile.writeText("", Charsets.UTF_8)
-        sessionsFile.writeText("", Charsets.UTF_8)
+    fun clearHistory() {
+        if (samplesFile.exists()) {
+            samplesFile.delete()
+        }
+        if (sessionsFile.exists()) {
+            sessionsFile.delete()
+        }
+    }
+
+    @Synchronized
+    fun clearExportCache(context: Context) {
+        exportDir(context).deleteRecursively()
+        if (lastExportFile.exists()) {
+            lastExportFile.delete()
+        }
+    }
+
+    @Synchronized
+    fun clearAll(context: Context) {
+        clearHistory()
+        clearExportCache(context)
+    }
+
+    @Synchronized
+    fun storageStats(context: Context): JSObject {
+        val exportStats = directoryStats(exportDir(context))
+        val metadataSize = if (lastExportFile.exists()) lastExportFile.length() else 0L
+        val historySize = if (samplesFile.exists()) samplesFile.length() else 0L
+        val sessionsSize = if (sessionsFile.exists()) sessionsFile.length() else 0L
+        return JSObject().apply {
+            put("historyRows", countRows(samplesFile))
+            put("historySizeBytes", historySize)
+            put("sessionsRows", countRows(sessionsFile))
+            put("sessionsSizeBytes", sessionsSize)
+            put("exportFileCount", exportStats.first)
+            put("exportCacheSizeBytes", exportStats.second)
+            put("totalHeartRateSizeBytes", historySize + sessionsSize + exportStats.second + metadataSize)
+        }
     }
 
     fun newSessionId(): String {
@@ -121,7 +156,7 @@ class HeartRateStorage(private val filesDir: File) {
     private fun createExportFile(context: Context, format: String, sinceMs: Long?, untilMs: Long?): HeartRateExportFile {
         ensureRootDir()
         val normalizedFormat = normalizeFormat(format)
-        val exportDir = File(context.cacheDir, "heart_rate_exports").apply { mkdirs() }
+        val exportDir = exportDir(context).apply { mkdirs() }
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val extension = if (normalizedFormat == "csv") "csv" else "jsonl"
         val mimeType = mimeTypeForFormat(normalizedFormat)
@@ -129,10 +164,13 @@ class HeartRateStorage(private val filesDir: File) {
         val samples = readSampleObjects(sinceMs, untilMs).toList()
 
         if (normalizedFormat == "csv") {
-            val header = "timestampMs,sessionId,deviceName,bpm,rrMs,batteryLevel,rawHex\n"
+            val header = "timestampMs,datetimeShanghai,timeShanghai,sessionId,deviceName,bpm,rrMs,batteryLevel,rawHex\n"
             val rows = samples.joinToString(separator = "\n") { sample ->
+                val timestampMs = sample.optLong("timestampMs", 0L)
                 listOf(
-                    sample.optLong("timestampMs", 0L).toString(),
+                    timestampMs.toString(),
+                    csvCell(formatShanghaiDateTime(timestampMs)),
+                    csvCell(formatShanghaiTime(timestampMs)),
                     csvCell(sample.optString("sessionId", "")),
                     csvCell(sample.optString("deviceName", "")),
                     sample.optInt("bpm", 0).toString(),
@@ -143,7 +181,11 @@ class HeartRateStorage(private val filesDir: File) {
             }
             outputFile.writeText(header + rows + if (rows.isNotEmpty()) "\n" else "", Charsets.UTF_8)
         } else {
-            outputFile.writeText(samples.joinToString(separator = "\n") { it.toString() } + if (samples.isNotEmpty()) "\n" else "", Charsets.UTF_8)
+            outputFile.writeText(
+                samples.joinToString(separator = "\n") { exportJsonObject(it).toString() } +
+                    if (samples.isNotEmpty()) "\n" else "",
+                Charsets.UTF_8,
+            )
         }
 
         val createdAtMs = System.currentTimeMillis()
@@ -257,6 +299,32 @@ class HeartRateStorage(private val filesDir: File) {
         }
     }
 
+    private fun exportDir(context: Context): File = File(context.cacheDir, "heart_rate_exports")
+
+    private fun countRows(file: File): Int {
+        if (!file.exists()) {
+            return 0
+        }
+        return file.useLines(Charsets.UTF_8) { lines ->
+            lines.count { it.isNotBlank() }
+        }
+    }
+
+    private fun directoryStats(dir: File): Pair<Int, Long> {
+        if (!dir.exists()) {
+            return 0 to 0L
+        }
+        var fileCount = 0
+        var sizeBytes = 0L
+        dir.walkTopDown()
+            .filter { it.isFile }
+            .forEach { file ->
+                fileCount += 1
+                sizeBytes += file.length()
+            }
+        return fileCount to sizeBytes
+    }
+
     private fun readSampleObjects(sinceMs: Long?, untilMs: Long?): Sequence<JSONObject> {
         if (!samplesFile.exists()) {
             return emptySequence()
@@ -275,12 +343,40 @@ class HeartRateStorage(private val filesDir: File) {
         return (0 until rr.length()).joinToString("|") { index -> rr.optInt(index).toString() }
     }
 
+    private fun exportJsonObject(sample: JSONObject): JSONObject {
+        val timestampMs = sample.optLong("timestampMs", 0L)
+        return JSONObject(sample.toString()).apply {
+            put("datetimeShanghai", formatShanghaiDateTime(timestampMs))
+            put("timeShanghai", formatShanghaiTime(timestampMs))
+        }
+    }
+
+    private fun formatShanghaiDateTime(timestampMs: Long): String =
+        SHANGHAI_DATE_TIME_FORMAT.get().format(Date(timestampMs))
+
+    private fun formatShanghaiTime(timestampMs: Long): String =
+        SHANGHAI_TIME_FORMAT.get().format(Date(timestampMs))
+
     private fun csvCell(value: String): String {
         val escaped = value.replace("\"", "\"\"")
         return if (escaped.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) {
             "\"$escaped\""
         } else {
             escaped
+        }
+    }
+
+    companion object {
+        private val SHANGHAI_TIME_ZONE: TimeZone = TimeZone.getTimeZone("Asia/Shanghai")
+        private val SHANGHAI_DATE_TIME_FORMAT = ThreadLocal.withInitial {
+            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).apply {
+                timeZone = SHANGHAI_TIME_ZONE
+            }
+        }
+        private val SHANGHAI_TIME_FORMAT = ThreadLocal.withInitial {
+            SimpleDateFormat("HH:mm:ss", Locale.CHINA).apply {
+                timeZone = SHANGHAI_TIME_ZONE
+            }
         }
     }
 }

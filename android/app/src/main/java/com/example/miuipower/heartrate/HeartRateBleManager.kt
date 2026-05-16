@@ -121,6 +121,10 @@ class HeartRateBleManager(
         return storage.getOrCreateExport(context, format)
     }
 
+    fun storageStats(context: Context): JSObject {
+        return storage.storageStats(context)
+    }
+
     @SuppressLint("MissingPermission")
     fun scan(durationMs: Long, onComplete: (JSObject) -> Unit) {
         val adapter = bluetoothAdapter()
@@ -333,12 +337,36 @@ class HeartRateBleManager(
     }
 
     fun clearHistory(): JSObject {
-        storage.clear()
+        if (isRecordingActive()) {
+            return operationResult(false, "recording_active", "Stop recording before clearing heart-rate data.")
+        }
+        storage.clearHistory()
         synchronized(this) {
             sampleCount = 0
         }
         emitState()
         return operationResult(true, "history_cleared")
+    }
+
+    fun clearExportCache(context: Context): JSObject {
+        if (isRecordingActive()) {
+            return operationResult(false, "recording_active", "Stop recording before clearing heart-rate data.")
+        }
+        storage.clearExportCache(context)
+        return operationResult(true, "export_cache_cleared")
+    }
+
+    fun clearAll(context: Context): JSObject {
+        if (isRecordingActive()) {
+            return operationResult(false, "recording_active", "Stop recording before clearing heart-rate data.")
+        }
+        storage.clearAll(context)
+        synchronized(this) {
+            sampleCount = 0
+            latestSample = null
+        }
+        emitState()
+        return operationResult(true, "heart_rate_data_cleared")
     }
 
     @SuppressLint("MissingPermission")
@@ -765,6 +793,12 @@ class HeartRateBleManager(
         put("recording", recording)
         put("error", errorText)
         put("bodySensorLocation", bodySensorLocation ?: "")
+        put("lastNativeUpdateMs", System.currentTimeMillis())
+        if (latestSample == null) {
+            put("lastSampleTimestampMs", JSONObject.NULL)
+        } else {
+            put("lastSampleTimestampMs", latestSample?.timestampMs)
+        }
         if (batteryLevel == null) {
             put("batteryLevel", JSONObject.NULL)
         } else {

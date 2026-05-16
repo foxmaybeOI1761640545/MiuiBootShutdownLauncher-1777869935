@@ -477,6 +477,15 @@ class MiuiPowerPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun markFrontendReady(call: PluginCall) {
+        MainActivity.markFrontendReady(call.getString("page") ?: "")
+        call.resolve(result(true, "frontend_ready").apply {
+            put("page", call.getString("page") ?: "")
+            put("timestampMs", call.getLong("timestampMs") ?: System.currentTimeMillis())
+        })
+    }
+
+    @PluginMethod
     fun saveGitHubExportSettings(call: PluginCall) {
         val result = try {
             githubUploader.saveSettings(
@@ -524,8 +533,23 @@ class MiuiPowerPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun getHeartRateStorageStats(call: PluginCall) {
+        call.resolve(heartRateManager.storageStats(context))
+    }
+
+    @PluginMethod
     fun clearHeartRateHistory(call: PluginCall) {
         call.resolve(heartRateManager.clearHistory())
+    }
+
+    @PluginMethod
+    fun clearHeartRateExportCache(call: PluginCall) {
+        call.resolve(heartRateManager.clearExportCache(context))
+    }
+
+    @PluginMethod
+    fun clearAllHeartRateData(call: PluginCall) {
+        call.resolve(heartRateManager.clearAll(context))
     }
 
     @PluginMethod
