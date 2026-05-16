@@ -47,6 +47,7 @@ class MiuiPowerPlugin : Plugin() {
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val heartRateManager by lazy { HeartRateEnvironment.manager(context.applicationContext) }
+    private val autoHeartRateController by lazy { HeartRateEnvironment.autoController(context.applicationContext) }
     private val githubUploader by lazy { HeartRateGithubUploader(context.applicationContext) }
     private var removeHeartRateEventSink: (() -> Unit)? = null
 
@@ -425,6 +426,92 @@ class MiuiPowerPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun getAutoHeartRateSettings(call: PluginCall) {
+        call.resolve(autoHeartRateController.getSettings().toJson().apply {
+            put("ok", true)
+            put("method", "auto_heart_rate_settings")
+        })
+    }
+
+    @PluginMethod
+    fun saveAutoHeartRateSettings(call: PluginCall) {
+        call.resolve(autoHeartRateController.saveSettings(call.data))
+    }
+
+    @PluginMethod
+    fun enableAutoHeartRateMode(call: PluginCall) {
+        if (heartRateManager.isRecordingActive() && !heartRateManager.getStateJson().optBoolean("autoRecordingActive", false)) {
+            call.resolve(result(false, "manual_recording_active").apply {
+                put("error", "Stop manual heart-rate recording before enabling Auto Mode.")
+                put("state", autoHeartRateController.getStateJson())
+            })
+            return
+        }
+        if (!hasHeartRateBlePermissions()) {
+            call.resolve(heartRatePermissionResult(false).apply {
+                put("method", "permission_required")
+                put("state", autoHeartRateController.getStateJson())
+            })
+            return
+        }
+        if (!hasHeartRateNotificationPermission()) {
+            call.resolve(result(false, "notification_permission_required").apply {
+                put("state", autoHeartRateController.getStateJson())
+            })
+            return
+        }
+        try {
+            val intent = Intent(context, HeartRateForegroundService::class.java).apply {
+                action = HeartRateForegroundService.ACTION_START_AUTO
+            }
+            ContextCompat.startForegroundService(context, intent)
+            call.resolve(result(true, "auto_foreground_service_starting").apply {
+                put("state", autoHeartRateController.getStateJson())
+            })
+        } catch (error: Exception) {
+            call.resolve(result(false, "auto_foreground_service_start_failed").apply {
+                put("error", error.message ?: error.javaClass.simpleName)
+                put("state", autoHeartRateController.getStateJson())
+            })
+        }
+    }
+
+    @PluginMethod
+    fun disableAutoHeartRateMode(call: PluginCall) {
+        val intent = Intent(context, HeartRateForegroundService::class.java).apply {
+            action = HeartRateForegroundService.ACTION_STOP_AUTO
+        }
+        context.startService(intent)
+        call.resolve(autoHeartRateController.disable())
+    }
+
+    @PluginMethod
+    fun getAutoHeartRateState(call: PluginCall) {
+        call.resolve(autoHeartRateController.getStateJson())
+    }
+
+    @PluginMethod
+    fun getHeartRateUploadQueue(call: PluginCall) {
+        call.resolve(autoHeartRateController.getUploadQueueState())
+    }
+
+    @PluginMethod
+    fun retryHeartRateUploadNow(call: PluginCall) {
+        call.resolve(autoHeartRateController.retryUploadNow())
+    }
+
+    @PluginMethod
+    fun clearUploadedLocalChunks(call: PluginCall) {
+        if (heartRateManager.isRecordingActive()) {
+            call.resolve(result(false, "recording_active").apply {
+                put("error", "Stop recording before clearing uploaded local chunks.")
+            })
+            return
+        }
+        call.resolve(autoHeartRateController.clearUploadedLocalChunks())
+    }
+
+    @PluginMethod
     fun consumeOpenAppIntent(call: PluginCall) {
         val intent = activity?.intent
         val openPage = intent?.getStringExtra("openPage").orEmpty()
@@ -534,7 +621,14 @@ class MiuiPowerPlugin : Plugin() {
 
     @PluginMethod
     fun getHeartRateStorageStats(call: PluginCall) {
-        call.resolve(heartRateManager.storageStats(context))
+        val stats = heartRateManager.storageStats(context)
+        val autoStats = autoHeartRateController.storageStats()
+        stats.put("autoCurrentChunkRows", autoStats.optInt("autoCurrentChunkRows", 0))
+        stats.put("autoPendingChunkCount", autoStats.optInt("autoPendingChunkCount", 0))
+        stats.put("autoFailedChunkCount", autoStats.optInt("autoFailedChunkCount", 0))
+        stats.put("autoPendingUploadSizeBytes", autoStats.optLong("autoPendingUploadSizeBytes", 0L))
+        stats.put("autoUploadedSummaryCount", autoStats.optInt("autoUploadedSummaryCount", 0))
+        call.resolve(stats)
     }
 
     @PluginMethod

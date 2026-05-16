@@ -87,6 +87,7 @@ export interface HeartRateState {
   serviceRunning: boolean;
   foregroundNotificationVisible?: boolean;
   autoReconnectEnabled?: boolean;
+  autoRecordingActive?: boolean;
   reconnectAttempt?: number;
   nextReconnectDelayMs?: number | null;
   recording: boolean;
@@ -96,6 +97,62 @@ export interface HeartRateState {
   batteryLevel?: number | null;
   lastNativeUpdateMs?: number;
   lastSampleTimestampMs?: number | null;
+}
+
+export interface AutoHeartRateSettings {
+  ok?: boolean;
+  method?: string;
+  enabled: boolean;
+  targetDeviceName: string;
+  targetDeviceAddress?: string | null;
+  chunkSize: number;
+  overlapRows: number;
+  uploadCsv: boolean;
+  uploadJsonl: boolean;
+  deleteLocalAfterUpload: boolean;
+  retryIntervalMs: number;
+  failureNotifyThreshold: number;
+}
+
+export interface HeartRateUploadFailureRecord {
+  timestampMs: number;
+  chunkId: string;
+  fileType: "csv" | "jsonl";
+  attempt: number;
+  errorType: string;
+  httpCode?: number | null;
+  message: string;
+}
+
+export interface AutoHeartRateState {
+  enabled: boolean;
+  targetName: string;
+  targetAddress?: string | null;
+  serviceRunning: boolean;
+  bluetoothOn: boolean;
+  scanning: boolean;
+  connecting: boolean;
+  connected: boolean;
+  recording: boolean;
+  currentChunkRows: number;
+  chunkSize: number;
+  overlapRows: number;
+  pendingUploadChunks: number;
+  uploadRunning: boolean;
+  consecutiveUploadFailures: number;
+  lastUploadError?: string;
+  lastThreeUploadErrors: HeartRateUploadFailureRecord[];
+  lastNativeUpdateMs?: number;
+  managerStatus?: string;
+}
+
+export interface HeartRateUploadQueueState {
+  pendingChunks: number;
+  uploadRunning: boolean;
+  consecutiveUploadFailures: number;
+  lastThreeUploadErrors: HeartRateUploadFailureRecord[];
+  currentChunkId?: string | null;
+  currentStatus: string;
 }
 
 export interface HeartRatePermissionResult {
@@ -146,6 +203,11 @@ export interface HeartRateStorageStats {
   exportFileCount: number;
   exportCacheSizeBytes: number;
   totalHeartRateSizeBytes: number;
+  autoCurrentChunkRows?: number;
+  autoPendingChunkCount?: number;
+  autoFailedChunkCount?: number;
+  autoPendingUploadSizeBytes?: number;
+  autoUploadedSummaryCount?: number;
 }
 
 export interface GitHubExportSettings {
@@ -274,6 +336,14 @@ export interface MiuiPowerPlugin {
   stopHeartRateRecording(): Promise<OpenAppCommandResult>;
   getHeartRateServiceState(): Promise<HeartRateState>;
   setHeartRateAutoReconnect(options: { enabled: boolean }): Promise<OpenAppCommandResult>;
+  getAutoHeartRateSettings(): Promise<AutoHeartRateSettings>;
+  saveAutoHeartRateSettings(settings: Partial<AutoHeartRateSettings>): Promise<OpenAppCommandResult>;
+  enableAutoHeartRateMode(): Promise<OpenAppCommandResult>;
+  disableAutoHeartRateMode(): Promise<OpenAppCommandResult>;
+  getAutoHeartRateState(): Promise<AutoHeartRateState>;
+  getHeartRateUploadQueue(): Promise<HeartRateUploadQueueState>;
+  retryHeartRateUploadNow(): Promise<OpenAppCommandResult>;
+  clearUploadedLocalChunks(): Promise<OpenAppCommandResult>;
   consumeOpenAppIntent(): Promise<OpenAppIntentResult>;
   exportHeartRateHistory(options: {
     format: HeartRateExportFormat;
@@ -316,6 +386,26 @@ export interface MiuiPowerPlugin {
   addListener(
     eventName: "heartRateSample",
     listenerFunc: (sample: HeartRateSample) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: "autoHeartRateStateChanged",
+    listenerFunc: (state: AutoHeartRateState) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: "heartRateUploadQueueChanged",
+    listenerFunc: (state: HeartRateUploadQueueState) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: "heartRateUploadAlert",
+    listenerFunc: (state: { consecutiveUploadFailures: number; lastThreeUploadErrors: HeartRateUploadFailureRecord[] }) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: "heartRateChunkClosed" | "heartRateChunkUploaded",
+    listenerFunc: (state: Record<string, unknown>) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: "heartRateUploadFailed",
+    listenerFunc: (failure: HeartRateUploadFailureRecord & { state?: HeartRateUploadQueueState }) => void,
   ): Promise<PluginListenerHandle>;
   openHonorOfKings(): Promise<OpenHonorOfKingsResult>;
   openScreenTimePage(): Promise<OpenAppCommandResult>;

@@ -59,6 +59,8 @@ class HeartRateBleManager(
     private var pendingRecordingStart = false
     private var manualStopRequested = false
     private var reconnectRunnable: Runnable? = null
+    private var autoRecordingActive = false
+    private var autoSampleSink: ((HeartRateSample) -> Unit)? = null
 
     fun getStateJson(): JSObject = synchronized(this) {
         buildStateJson()
@@ -107,6 +109,21 @@ class HeartRateBleManager(
         }
         emitState()
         return operationResult(true, if (enabled) "auto_reconnect_enabled" else "auto_reconnect_disabled")
+    }
+
+    fun setAutoSampleSink(sink: (HeartRateSample) -> Unit) {
+        synchronized(this) {
+            autoSampleSink = sink
+        }
+    }
+
+    fun isAutoRecordingActive(): Boolean = synchronized(this) {
+        autoRecordingActive && (
+            status == STATUS_CONNECTING ||
+                status == STATUS_CONNECTED ||
+                status == STATUS_RECORDING ||
+                status == STATUS_RECONNECTING
+            )
     }
 
     fun exportHistory(context: Context, format: String, sinceMs: Long?, untilMs: Long?): JSObject {
@@ -253,6 +270,7 @@ class HeartRateBleManager(
         synchronized(this) {
             serviceRunning = true
             foregroundNotificationVisible = true
+            autoRecordingActive = false
             manualStopRequested = false
             cancelReconnectLocked()
 
@@ -286,6 +304,33 @@ class HeartRateBleManager(
         }
     }
 
+    fun startAutoConnectRecording(address: String, name: String?, onComplete: (JSObject) -> Unit) {
+        synchronized(this) {
+            serviceRunning = true
+            foregroundNotificationVisible = true
+            pendingRecordingStart = true
+            autoRecordingActive = true
+            manualStopRequested = false
+        }
+        connect(address, name) {
+            onComplete(operationResult(true, "auto_connecting"))
+        }
+    }
+
+    fun stopAutoRecording(onComplete: (JSObject) -> Unit) {
+        val wasAuto = synchronized(this) { autoRecordingActive }
+        if (!wasAuto) {
+            onComplete(operationResult(true, "auto_not_running"))
+            return
+        }
+        stopForegroundRecording {
+            synchronized(this) {
+                autoRecordingActive = false
+            }
+            onComplete(operationResult(true, "auto_recording_stopped"))
+        }
+    }
+
     fun stopRecording(onComplete: (JSObject) -> Unit) {
         stopForegroundRecording(onComplete)
     }
@@ -293,21 +338,24 @@ class HeartRateBleManager(
     fun stopForegroundRecording(onComplete: (JSObject) -> Unit) {
         val sessionToStop: String?
         val samplesToStop: Int
+        val shouldWriteSessionStop: Boolean
         synchronized(this) {
             manualStopRequested = true
             cancelReconnectLocked()
             status = STATUS_STOPPING
             sessionToStop = if (recording && currentSessionId != "live") currentSessionId else null
             samplesToStop = sampleCount
+            shouldWriteSessionStop = !autoRecordingActive
             recording = false
             pendingRecordingStart = false
             serviceRunning = false
             foregroundNotificationVisible = false
             nextReconnectDelayMs = null
             reconnectAttempt = 0
+            autoRecordingActive = false
         }
         emitState()
-        if (sessionToStop != null) {
+        if (sessionToStop != null && shouldWriteSessionStop) {
             storage.appendSessionStop(sessionToStop, samplesToStop)
         }
         disconnectInternal(resetState = true)
@@ -320,7 +368,9 @@ class HeartRateBleManager(
         if (!recording) {
             currentSessionId = storage.newSessionId()
             sampleCount = 0
-            storage.appendSessionStart(currentSessionId, connectedDevice)
+            if (!autoRecordingActive) {
+                storage.appendSessionStart(currentSessionId, connectedDevice)
+            }
         }
         recording = true
         pendingRecordingStart = false
@@ -506,6 +556,7 @@ class HeartRateBleManager(
                 foregroundNotificationVisible = false
                 nextReconnectDelayMs = null
                 reconnectAttempt = 0
+                autoRecordingActive = false
             }
             emitState()
         }
@@ -545,16 +596,19 @@ class HeartRateBleManager(
                 } else {
                     val sessionToStop: String?
                     val samplesToStop: Int
+                    val shouldWriteSessionStop: Boolean
                     synchronized(this@HeartRateBleManager) {
                         sessionToStop = if (recording && currentSessionId != "live") currentSessionId else null
                         samplesToStop = sampleCount
+                        shouldWriteSessionStop = !autoRecordingActive
                         status = STATUS_DISCONNECTED
                         recording = false
                         pendingRecordingStart = false
                         serviceRunning = false
                         foregroundNotificationVisible = false
+                        autoRecordingActive = false
                     }
-                    if (sessionToStop != null) {
+                    if (sessionToStop != null && shouldWriteSessionStop) {
                         storage.appendSessionStop(sessionToStop, samplesToStop)
                     }
                     emitState()
@@ -733,7 +787,11 @@ class HeartRateBleManager(
             latestSample = nextSample
             if (recording) {
                 sampleCount += 1
-                storage.appendSample(nextSample)
+                if (autoRecordingActive) {
+                    autoSampleSink?.invoke(nextSample)
+                } else {
+                    storage.appendSample(nextSample)
+                }
             }
             nextSample
         }
@@ -763,6 +821,13 @@ class HeartRateBleManager(
         synchronized(this) {
             status = nextStatus
             errorText = error
+            if (autoRecordingActive &&
+                (nextStatus == STATUS_ERROR || nextStatus == STATUS_PERMISSION_REQUIRED || nextStatus == STATUS_BLUETOOTH_OFF)
+            ) {
+                pendingRecordingStart = false
+                recording = false
+                autoRecordingActive = false
+            }
         }
         emitState()
     }
@@ -779,6 +844,7 @@ class HeartRateBleManager(
         put("serviceRunning", serviceRunning)
         put("foregroundNotificationVisible", foregroundNotificationVisible)
         put("autoReconnectEnabled", autoReconnectEnabled)
+        put("autoRecordingActive", autoRecordingActive)
         put("reconnectAttempt", reconnectAttempt)
         if (nextReconnectDelayMs == null) {
             put("nextReconnectDelayMs", JSONObject.NULL)

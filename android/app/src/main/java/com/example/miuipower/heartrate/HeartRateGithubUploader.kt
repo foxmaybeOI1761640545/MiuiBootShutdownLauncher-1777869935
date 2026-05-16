@@ -142,6 +142,72 @@ class HeartRateGithubUploader(context: Context) {
         }
     }
 
+    fun uploadLocalFile(file: File, remotePath: String, message: String, rowCount: Int): JSObject {
+        val settings = readSettings()
+        val token = readToken()
+        val invalid = validateSettings(settings, token)
+        if (invalid != null) {
+            return invalid.apply {
+                put("fileName", file.name)
+                put("path", remotePath)
+                put("rowCount", rowCount)
+                put("errorType", errorTypeForStatus(optInt("statusCode", 0)))
+            }
+        }
+
+        if (!file.exists() || !file.isFile) {
+            return JSObject().apply {
+                put("ok", false)
+                put("method", "missing_local_file")
+                put("fileName", file.name)
+                put("path", remotePath)
+                put("rowCount", rowCount)
+                put("errorType", "unknown")
+                put("error", "Local upload file is missing.")
+            }
+        }
+
+        val contentBase64 = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
+        val body = JSONObject().apply {
+            put("message", message)
+            put("content", contentBase64)
+            put("branch", settings.branch)
+        }
+        val url = "${GITHUB_API}/repos/${encodeSegment(settings.owner)}/${encodeSegment(settings.repo)}/contents/${encodePath(normalizeRepoPath(remotePath))}"
+        val response = request("PUT", url, token = token, body = body.toString())
+        if (response.code in 200..299) {
+            val json = runCatching { JSONObject(response.text) }.getOrNull()
+            val commitSha = json?.optJSONObject("commit")?.optString("sha", "")
+            val htmlUrl = json?.optJSONObject("content")?.optString("html_url", "")
+            return JSObject().apply {
+                put("ok", true)
+                put("method", "github_contents_api")
+                put("fileName", file.name)
+                put("path", normalizeRepoPath(remotePath))
+                put("rowCount", rowCount)
+                if (!commitSha.isNullOrBlank()) {
+                    put("commitSha", commitSha)
+                }
+                if (!htmlUrl.isNullOrBlank()) {
+                    put("htmlUrl", htmlUrl)
+                }
+            }
+        }
+
+        return githubError("github_contents_api", response).apply {
+            put("fileName", file.name)
+            put("path", normalizeRepoPath(remotePath))
+            put("rowCount", rowCount)
+            put("errorType", errorTypeForStatus(response.code))
+        }
+    }
+
+    fun autoUploadPath(fileName: String, createdAtMs: Long): String {
+        val settings = readSettings()
+        val dayPath = SimpleDateFormat("yyyy/MM/dd", Locale.US).format(Date(createdAtMs))
+        return normalizeRepoPath("${settings.pathPrefix}/$dayPath/$fileName")
+    }
+
     private fun readSettings(): GithubSettings {
         return GithubSettings(
             owner = preferences.getString(KEY_OWNER, "")?.trim().orEmpty(),
@@ -217,8 +283,21 @@ class HeartRateGithubUploader(context: Context) {
             put("ok", false)
             put("method", method)
             put("statusCode", response.code)
+            put("errorType", errorTypeForStatus(response.code))
             put("error", "${response.code} ${message.take(400)}")
         }
+    }
+
+    private fun errorTypeForStatus(statusCode: Int): String = when (statusCode) {
+        0 -> "network"
+        401 -> "unauthorized"
+        403 -> "forbidden"
+        404 -> "not_found"
+        409 -> "conflict"
+        422 -> "conflict"
+        429 -> "rate_limited"
+        in 500..599 -> "server"
+        else -> "unknown"
     }
 
     private fun request(

@@ -480,6 +480,7 @@ html {
 .run-bpm-card,
 .run-chart-card,
 .run-controls-card,
+.run-auto-card,
 .run-data-card,
 .run-history-card {
   border: 1px solid var(--border-soft);

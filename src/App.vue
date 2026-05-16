@@ -152,6 +152,61 @@
                 </div>
               </article>
 
+              <article class="run-auto-card">
+                <div class="run-history-head">
+                  <div>
+                    <p class="run-card-label">Auto Sync</p>
+                    <strong>{{ autoHeartRateSummary }}</strong>
+                    <small>{{ autoHeartRateDetail }}</small>
+                  </div>
+                  <div class="settings-row-btns">
+                    <button
+                      type="button"
+                      class="mini-btn"
+                      :disabled="isLoading || autoHeartRateState.enabled"
+                      @click="enableAutoHeartRateMode"
+                    >
+                      Enable Auto
+                    </button>
+                    <button
+                      type="button"
+                      class="mini-btn mini-btn-danger"
+                      :disabled="isLoading || !autoHeartRateState.enabled"
+                      @click="disableAutoHeartRateMode"
+                    >
+                      Disable Auto
+                    </button>
+                    <button type="button" class="mini-btn" :disabled="isLoading" @click="retryHeartRateUploadNow">
+                      Retry Upload
+                    </button>
+                  </div>
+                </div>
+                <div class="run-storage-list">
+                  <div>
+                    <span>Target</span>
+                    <strong>{{ autoHeartRateState.targetName }}</strong>
+                  </div>
+                  <div>
+                    <span>Chunk</span>
+                    <strong>{{ autoHeartRateState.currentChunkRows }}/{{ autoHeartRateState.chunkSize }} · overlap {{ autoHeartRateState.overlapRows }}</strong>
+                  </div>
+                  <div>
+                    <span>Queue</span>
+                    <strong>{{ autoHeartRateState.pendingUploadChunks }} pending · {{ autoHeartRateState.uploadRunning ? "uploading" : "idle" }}</strong>
+                  </div>
+                  <div>
+                    <span>Failures</span>
+                    <strong>{{ autoHeartRateState.consecutiveUploadFailures }}</strong>
+                  </div>
+                </div>
+                <div v-if="autoHeartRateState.lastThreeUploadErrors.length > 0" class="run-history-list">
+                  <div v-for="failure in autoHeartRateState.lastThreeUploadErrors" :key="`${failure.timestampMs}-${failure.chunkId}-${failure.fileType}`">
+                    <span>{{ formatShanghaiTime(failure.timestampMs) }} · {{ failure.chunkId }} · {{ failure.fileType.toUpperCase() }}</span>
+                    <strong>{{ failure.httpCode ?? failure.errorType }} {{ failure.message }}</strong>
+                  </div>
+                </div>
+              </article>
+
               <article class="run-data-card">
                 <div class="run-data-grid">
                   <span>rawHex</span>
@@ -742,12 +797,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import {
   type ClipboardTextResult,
   type DisplayRefreshRateResult,
+  type AutoHeartRateState,
   type HeartRateDevice,
   type HeartRateExportFormat,
   type HeartRateExportResult,
   type HeartRateSample,
   type HeartRateState,
   type HeartRateStorageStats,
+  type HeartRateUploadFailureRecord,
+  type HeartRateUploadQueueState,
   type GitHubExportSettingsResult,
   type LaunchIntentOptions,
   type OpenAppCommandResult,
@@ -1004,6 +1062,33 @@ const heartRateState = ref<HeartRateState>({
   bodySensorLocation: "",
   batteryLevel: null,
 });
+const autoHeartRateState = ref<AutoHeartRateState>({
+  enabled: false,
+  targetName: "10705-1",
+  targetAddress: null,
+  serviceRunning: false,
+  bluetoothOn: false,
+  scanning: false,
+  connecting: false,
+  connected: false,
+  recording: false,
+  currentChunkRows: 0,
+  chunkSize: 1200,
+  overlapRows: 10,
+  pendingUploadChunks: 0,
+  uploadRunning: false,
+  consecutiveUploadFailures: 0,
+  lastUploadError: "",
+  lastThreeUploadErrors: [],
+});
+const heartRateUploadQueue = ref<HeartRateUploadQueueState>({
+  pendingChunks: 0,
+  uploadRunning: false,
+  consecutiveUploadFailures: 0,
+  lastThreeUploadErrors: [],
+  currentChunkId: null,
+  currentStatus: "idle",
+});
 const heartRateDevices = ref<HeartRateDevice[]>([]);
 const lastHeartRateDevice = ref<HeartRateDevice | null>(null);
 const heartRateHistory = ref<HeartRateSample[]>([]);
@@ -1035,6 +1120,9 @@ let appResumeListenerHandle: CapacitorAppListenerHandle | null = null;
 let heartRateStateListenerHandle: CapacitorAppListenerHandle | null = null;
 let heartRateDeviceListenerHandle: CapacitorAppListenerHandle | null = null;
 let heartRateSampleListenerHandle: CapacitorAppListenerHandle | null = null;
+let autoHeartRateStateListenerHandle: CapacitorAppListenerHandle | null = null;
+let heartRateUploadQueueListenerHandle: CapacitorAppListenerHandle | null = null;
+let heartRateUploadAlertListenerHandle: CapacitorAppListenerHandle | null = null;
 let heartRateClockTimer: number | undefined;
 
 const isLoading = computed(() => loadingAction.value !== "");
@@ -1136,6 +1224,31 @@ const heartRateReconnectText = computed(() => {
 const heartRateReconnectButtonLabel = computed(() =>
   heartRateState.value.autoReconnectEnabled === false ? "Reconnect Off" : "Reconnect On",
 );
+const autoHeartRateSummary = computed(() => {
+  if (!autoHeartRateState.value.enabled) {
+    return "Off";
+  }
+  if (!autoHeartRateState.value.bluetoothOn) {
+    return "Bluetooth off";
+  }
+  if (autoHeartRateState.value.recording) {
+    return "Recording";
+  }
+  if (autoHeartRateState.value.connecting) {
+    return "Connecting";
+  }
+  if (autoHeartRateState.value.scanning) {
+    return "Searching";
+  }
+  return autoHeartRateState.value.serviceRunning ? "Ready" : "Starting service";
+});
+const autoHeartRateDetail = computed(() => {
+  const queue = `${autoHeartRateState.value.pendingUploadChunks} pending`;
+  const failures = autoHeartRateState.value.consecutiveUploadFailures > 0
+    ? ` · ${autoHeartRateState.value.consecutiveUploadFailures} failures`
+    : "";
+  return `${autoHeartRateState.value.targetName} · ${queue}${failures}`;
+});
 const hasHeartRateStartTarget = computed(() => Boolean(heartRateState.value.device || lastHeartRateDevice.value));
 const launchConfirmTitle = computed(() =>
   launchConfirm.reason === "low_refresh_rate" ? "当前为 60Hz，建议先调整刷新率" : "刷新率检测失败",
@@ -1246,6 +1359,56 @@ function applyHeartRateState(raw: HeartRateState) {
   } else if (heartRateState.value.status === "idle" || heartRateState.value.status === "disconnected") {
     latestValidHeartRateSample.value = null;
   }
+}
+
+function normalizeUploadFailures(raw: HeartRateUploadFailureRecord[] | undefined): HeartRateUploadFailureRecord[] {
+  return Array.isArray(raw) ? raw.slice(-3) : [];
+}
+
+function normalizeAutoHeartRateState(raw: AutoHeartRateState): AutoHeartRateState {
+  return {
+    enabled: Boolean(raw.enabled),
+    targetName: raw.targetName || "10705-1",
+    targetAddress: raw.targetAddress ?? null,
+    serviceRunning: Boolean(raw.serviceRunning),
+    bluetoothOn: Boolean(raw.bluetoothOn),
+    scanning: Boolean(raw.scanning),
+    connecting: Boolean(raw.connecting),
+    connected: Boolean(raw.connected),
+    recording: Boolean(raw.recording),
+    currentChunkRows: Number(raw.currentChunkRows ?? 0),
+    chunkSize: Number(raw.chunkSize ?? 1200),
+    overlapRows: Number(raw.overlapRows ?? 10),
+    pendingUploadChunks: Number(raw.pendingUploadChunks ?? 0),
+    uploadRunning: Boolean(raw.uploadRunning),
+    consecutiveUploadFailures: Number(raw.consecutiveUploadFailures ?? 0),
+    lastUploadError: raw.lastUploadError ?? "",
+    lastThreeUploadErrors: normalizeUploadFailures(raw.lastThreeUploadErrors),
+    lastNativeUpdateMs: raw.lastNativeUpdateMs,
+    managerStatus: raw.managerStatus,
+  };
+}
+
+function applyAutoHeartRateState(raw: AutoHeartRateState) {
+  autoHeartRateState.value = normalizeAutoHeartRateState(raw);
+}
+
+function applyHeartRateUploadQueue(raw: HeartRateUploadQueueState) {
+  heartRateUploadQueue.value = {
+    pendingChunks: Number(raw.pendingChunks ?? 0),
+    uploadRunning: Boolean(raw.uploadRunning),
+    consecutiveUploadFailures: Number(raw.consecutiveUploadFailures ?? 0),
+    lastThreeUploadErrors: normalizeUploadFailures(raw.lastThreeUploadErrors),
+    currentChunkId: raw.currentChunkId ?? null,
+    currentStatus: raw.currentStatus ?? "idle",
+  };
+  autoHeartRateState.value = {
+    ...autoHeartRateState.value,
+    pendingUploadChunks: heartRateUploadQueue.value.pendingChunks,
+    uploadRunning: heartRateUploadQueue.value.uploadRunning,
+    consecutiveUploadFailures: heartRateUploadQueue.value.consecutiveUploadFailures,
+    lastThreeUploadErrors: heartRateUploadQueue.value.lastThreeUploadErrors,
+  };
 }
 
 function pushLiveHeartRateSample(sample: HeartRateSample) {
@@ -1465,6 +1628,22 @@ async function refreshHeartRateStorageStats() {
   }
 }
 
+async function refreshAutoHeartRateState() {
+  try {
+    applyAutoHeartRateState(await MiuiPower.getAutoHeartRateState());
+  } catch {
+    // Native plugin may be unavailable in browser preview.
+  }
+}
+
+async function refreshHeartRateUploadQueue() {
+  try {
+    applyHeartRateUploadQueue(await MiuiPower.getHeartRateUploadQueue());
+  } catch {
+    // Native plugin may be unavailable in browser preview.
+  }
+}
+
 function applyGitHubExportSettings(result: GitHubExportSettingsResult) {
   githubExportForm.owner = result.owner ?? "";
   githubExportForm.repo = result.repo ?? "";
@@ -1511,6 +1690,8 @@ async function syncHeartRateOnResume() {
     refreshHeartRateHistory(),
     refreshLastHeartRateExport(),
     refreshHeartRateStorageStats(),
+    refreshAutoHeartRateState(),
+    refreshHeartRateUploadQueue(),
   ]);
   await markFrontendReady();
 }
@@ -1602,6 +1783,30 @@ async function toggleHeartRateAutoReconnect() {
     return result.ok
       ? `Heart-rate auto reconnect ${enabled ? "enabled" : "disabled"}.`
       : formatOpenResult("Heart-rate reconnect", result);
+  });
+}
+
+async function enableAutoHeartRateMode() {
+  await runWithLoading("autoHeartRateEnable", "Auto heart-rate start failed", async () => {
+    const result = await MiuiPower.enableAutoHeartRateMode();
+    await Promise.all([refreshAutoHeartRateState(), refreshHeartRateState(), refreshHeartRateStorageStats()]);
+    return result.ok ? "Auto heart-rate sync starting." : formatOpenResult("Auto heart-rate", result);
+  });
+}
+
+async function disableAutoHeartRateMode() {
+  await runWithLoading("autoHeartRateDisable", "Auto heart-rate stop failed", async () => {
+    const result = await MiuiPower.disableAutoHeartRateMode();
+    await Promise.all([refreshAutoHeartRateState(), refreshHeartRateState(), refreshHeartRateStorageStats()]);
+    return result.ok ? "Auto heart-rate sync stopped." : formatOpenResult("Auto heart-rate", result);
+  });
+}
+
+async function retryHeartRateUploadNow() {
+  await runWithLoading("autoHeartRateRetry", "Auto upload retry failed", async () => {
+    const result = await MiuiPower.retryHeartRateUploadNow();
+    await Promise.all([refreshAutoHeartRateState(), refreshHeartRateUploadQueue(), refreshHeartRateStorageStats()]);
+    return result.ok ? "Auto upload retry requested." : formatOpenResult("Auto upload", result);
   });
 }
 
@@ -3128,10 +3333,25 @@ async function teardownHeartRateListeners() {
       await heartRateSampleListenerHandle.remove();
       heartRateSampleListenerHandle = null;
     }
+    if (autoHeartRateStateListenerHandle) {
+      await autoHeartRateStateListenerHandle.remove();
+      autoHeartRateStateListenerHandle = null;
+    }
+    if (heartRateUploadQueueListenerHandle) {
+      await heartRateUploadQueueListenerHandle.remove();
+      heartRateUploadQueueListenerHandle = null;
+    }
+    if (heartRateUploadAlertListenerHandle) {
+      await heartRateUploadAlertListenerHandle.remove();
+      heartRateUploadAlertListenerHandle = null;
+    }
   } catch {
     heartRateStateListenerHandle = null;
     heartRateDeviceListenerHandle = null;
     heartRateSampleListenerHandle = null;
+    autoHeartRateStateListenerHandle = null;
+    heartRateUploadQueueListenerHandle = null;
+    heartRateUploadAlertListenerHandle = null;
   }
 }
 
@@ -3155,10 +3375,27 @@ async function setupHeartRateListeners() {
         heartRateHistory.value = [...heartRateHistory.value, sample].slice(-80);
       }
     });
+    autoHeartRateStateListenerHandle = await MiuiPower.addListener("autoHeartRateStateChanged", (state) => {
+      applyAutoHeartRateState(state);
+    });
+    heartRateUploadQueueListenerHandle = await MiuiPower.addListener("heartRateUploadQueueChanged", (state) => {
+      applyHeartRateUploadQueue(state);
+    });
+    heartRateUploadAlertListenerHandle = await MiuiPower.addListener("heartRateUploadAlert", (state) => {
+      autoHeartRateState.value = {
+        ...autoHeartRateState.value,
+        consecutiveUploadFailures: Number(state.consecutiveUploadFailures ?? 0),
+        lastThreeUploadErrors: normalizeUploadFailures(state.lastThreeUploadErrors),
+      };
+      message.value = "GitHub upload failed 3 times. Check Auto Sync failure details.";
+    });
   } catch {
     heartRateStateListenerHandle = null;
     heartRateDeviceListenerHandle = null;
     heartRateSampleListenerHandle = null;
+    autoHeartRateStateListenerHandle = null;
+    heartRateUploadQueueListenerHandle = null;
+    heartRateUploadAlertListenerHandle = null;
   }
 }
 
